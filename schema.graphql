@@ -5,10 +5,29 @@ type Parent {
   createdAt: AWSDateTime!
 }
 
+type Child {
+  id: ID!
+  parentId: ID!
+  name: String!
+  avatar: String
+  createdAt: AWSDateTime!
+}
+
 type Query {
   myProfile: Parent
+  myChildren: [Child!]!
+}
+
+input CreateChildProfileInput {
+  name: String!
+  avatar: String
+}
+
+type Mutation {
+  createChildProfile(input: CreateChildProfileInput!): Child!
 }
 
 schema {
   query: Query
+  mutation: Mutation
 }
