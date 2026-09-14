@@ -14,3 +14,23 @@ export function profileSk(): string {
 export function childSk(childId: string): string {
   return `CHILD#${childId}`;
 }
+
+// Partition key for a child's own item collection (word-progress items),
+// independent of the parent's partition -- enables per-child queries like
+// childWordProgress without touching the parent's data.
+export function childPk(childId: string): string {
+  return `CHILD#${childId}`;
+}
+
+// Sort key for a word-progress item within its child's CHILD# partition.
+// Combined with childPk, this is what recordWordAttempt Gets/Updates.
+export function wordSk(word: string): string {
+  return `WORD#${word}`;
+}
+
+// GSI1SK value for a word-progress item, sorted by status then word. Lets
+// queryChildWordProgress filter to one status via begins_with(GSI1SK, ...)
+// instead of scanning and filtering all of a child's words.
+export function statusIndexKey(status: string, word: string): string {
+  return `STATUS#${status}#WORD#${word}`;
+}

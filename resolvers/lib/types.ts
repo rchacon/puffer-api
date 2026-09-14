@@ -28,3 +28,15 @@ export interface Child {
   birthday: string;
   createdAt: string;
 }
+
+// Mirrors the WordStatus enum in schema.graphql.
+export type WordStatus = 'IN_PROGRESS' | 'NEEDS_SUPPORT' | 'MASTERED';
+
+// Mirrors the WordProgress type in schema.graphql.
+export interface WordProgress {
+  childId: string;
+  word: string;
+  status: WordStatus;
+  attempts: number;
+  lastPracticedAt: string;
+}

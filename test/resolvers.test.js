@@ -2,10 +2,19 @@ import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { createTable } from '../scripts/create-table.js';
-import { dynamoClient, marshall, runUnitResolver, TABLE_NAME } from './dynamoResolverHarness.js';
+import {
+  dynamoClient,
+  marshall,
+  runPipelineResolver,
+  runUnitResolver,
+  TABLE_NAME,
+} from './dynamoResolverHarness.js';
 import * as myProfile from '../resolvers/Query.myProfile.ts';
 import * as myChildren from '../resolvers/Query.myChildren.ts';
 import * as createChildProfile from '../resolvers/Mutation.createChildProfile.ts';
+import * as verifyChildOwnership from '../resolvers/functions/verifyChildOwnership.ts';
+import * as recordWordAttempt from '../resolvers/functions/recordWordAttempt.ts';
+import * as queryChildWordProgress from '../resolvers/functions/queryChildWordProgress.ts';
 
 function ctxFor(sub, args = {}) {
   return { identity: { sub }, args, stash: {} };
@@ -94,5 +103,61 @@ describe('createChildProfile + myChildren', () => {
       error: { message: 'ProvisionedThroughputExceededException', type: 'DynamoDB:ProvisionedThroughputExceededException' },
     };
     expect(() => myChildren.response(ctx)).toThrow('ProvisionedThroughputExceededException');
+  });
+});
+
+describe('recordWordAttempt + childWordProgress (pipeline)', () => {
+  it('records a word attempt and surfaces it via the status-filtered query', async () => {
+    const parentSub = randomUUID();
+    const child = await runUnitResolver(
+      createChildProfile,
+      ctxFor(parentSub, { input: { name: 'Rio' } })
+    );
+
+    const attempt1 = await runPipelineResolver(
+      [verifyChildOwnership, recordWordAttempt],
+      ctxFor(parentSub, { childId: child.id, word: 'whale', status: 'NEEDS_SUPPORT' })
+    );
+    expect(attempt1).toMatchObject({ word: 'whale', status: 'NEEDS_SUPPORT', attempts: 1 });
+
+    // Second attempt on the same word increments attempts and can change status.
+    const attempt2 = await runPipelineResolver(
+      [verifyChildOwnership, recordWordAttempt],
+      ctxFor(parentSub, { childId: child.id, word: 'whale', status: 'MASTERED' })
+    );
+    expect(attempt2).toMatchObject({ word: 'whale', status: 'MASTERED', attempts: 2 });
+
+    await runPipelineResolver(
+      [verifyChildOwnership, recordWordAttempt],
+      ctxFor(parentSub, { childId: child.id, word: 'otter', status: 'NEEDS_SUPPORT' })
+    );
+
+    const needsSupport = await runPipelineResolver(
+      [verifyChildOwnership, queryChildWordProgress],
+      ctxFor(parentSub, { childId: child.id, status: 'NEEDS_SUPPORT' })
+    );
+    expect(needsSupport.map((w) => w.word)).toEqual(['otter']);
+
+    const all = await runPipelineResolver(
+      [verifyChildOwnership, queryChildWordProgress],
+      ctxFor(parentSub, { childId: child.id })
+    );
+    expect(all.map((w) => w.word).sort()).toEqual(['otter', 'whale']);
+  });
+
+  it('rejects recording a word attempt against a child that is not the caller\'s', async () => {
+    const owner = randomUUID();
+    const attacker = randomUUID();
+    const child = await runUnitResolver(
+      createChildProfile,
+      ctxFor(owner, { input: { name: 'Sam' } })
+    );
+
+    await expect(
+      runPipelineResolver(
+        [verifyChildOwnership, recordWordAttempt],
+        ctxFor(attacker, { childId: child.id, word: 'whale', status: 'MASTERED' })
+      )
+    ).rejects.toThrow();
   });
 });
