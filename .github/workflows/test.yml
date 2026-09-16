@@ -27,6 +27,18 @@ jobs:
 
       - run: npm ci
 
+      - name: Wait for DynamoDB Local
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null "$DYNAMODB_ENDPOINT"; then
+              echo "DynamoDB Local is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "DynamoDB Local did not become ready in time" >&2
+          exit 1
+
       - name: Create DynamoDB table
         run: npm run create-table
 
