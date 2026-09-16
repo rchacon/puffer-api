@@ -1,6 +1,7 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { parentPk, profileSk } from '../../resolvers/lib/keys.js';
+import { TABLE_NAME } from '../../lib/tableName.js';
 
 // DYNAMODB_ENDPOINT is only set for local dev/CI (DynamoDB Local); in a real deploy
 // it's unset and the SDK resolves the real regional endpoint + Lambda role creds.
@@ -14,8 +15,6 @@ const client = DynamoDBDocumentClient.from(
     }),
   })
 );
-
-const TABLE_NAME = process.env.TABLE_NAME ?? 'PufferPanicTable';
 
 export async function handler(event) {
   if (event.triggerSource !== 'PostConfirmation_ConfirmSignUp') {

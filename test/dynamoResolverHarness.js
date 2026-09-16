@@ -6,8 +6,7 @@ import {
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
-
-const TABLE_NAME = process.env.TABLE_NAME ?? 'PufferPanicTable';
+import { TABLE_NAME } from '../lib/tableName.js';
 
 const client = new DynamoDBClient({
   endpoint: process.env.DYNAMODB_ENDPOINT ?? 'http://localhost:8000',

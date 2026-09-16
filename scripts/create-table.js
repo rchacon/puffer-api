@@ -3,9 +3,9 @@ import {
   DynamoDBClient,
   ResourceInUseException,
 } from '@aws-sdk/client-dynamodb';
+import { TABLE_NAME as TableName } from '../lib/tableName.js';
 
 const endpoint = process.env.DYNAMODB_ENDPOINT ?? 'http://localhost:8000';
-const TableName = process.env.TABLE_NAME ?? 'PufferPanicTable';
 
 const client = new DynamoDBClient({
   endpoint,
