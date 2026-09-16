@@ -14,10 +14,3 @@ export function profileSk() {
 export function childSk(childId) {
   return `CHILD#${childId}`;
 }
-
-// Partition key for a child's own item collection (word-progress items),
-// independent of the parent's partition -- enables per-child queries like
-// childWordProgress without touching the parent's data.
-export function childPk(childId) {
-  return `CHILD#${childId}`;
-}
