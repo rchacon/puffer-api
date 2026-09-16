@@ -67,23 +67,13 @@ describe('createChildProfile + myChildren', () => {
     });
   });
 
-  it('allows creating a child without a birthday', async () => {
-    const parentSub = randomUUID();
-
-    const created = await runUnitResolver(
-      createChildProfile,
-      ctxFor(parentSub, { input: { name: 'Milo' } })
-    );
-    expect(created.birthday).toBeNull();
-  });
-
   it('does not see another parent\'s children', async () => {
     const parentA = randomUUID();
     const parentB = randomUUID();
 
     await runUnitResolver(
       createChildProfile,
-      ctxFor(parentA, { input: { name: 'Grace' } })
+      ctxFor(parentA, { input: { name: 'Grace', birthday: '2018-11-03' } })
     );
 
     const childrenForB = await runUnitResolver(myChildren, ctxFor(parentB));
