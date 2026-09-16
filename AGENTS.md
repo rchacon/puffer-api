@@ -24,3 +24,7 @@ separate inline review comment (anchored to the specific file/line via
 `gh pr comment`) -- a combined comment listing every finding only supports
 one flat reply thread, making it impossible to reply to (or resolve)
 individual findings separately later.
+
+Do not mark review comment threads as resolved on GitHub, even after
+replying with the fix -- the repo owner does a final pass over open
+threads themselves and resolves them then.
