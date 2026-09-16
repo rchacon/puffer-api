@@ -1,0 +1,14 @@
+type Parent {
+  id: ID!
+  email: String!
+  name: String
+  createdAt: AWSDateTime!
+}
+
+type Query {
+  myProfile: Parent
+}
+
+schema {
+  query: Query
+}

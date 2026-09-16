@@ -1,0 +1,46 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+
+    env:
+      DYNAMODB_ENDPOINT: http://localhost:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Wait for DynamoDB Local
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null "$DYNAMODB_ENDPOINT"; then
+              echo "DynamoDB Local is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "DynamoDB Local did not become ready in time" >&2
+          exit 1
+
+      - name: Create DynamoDB table
+        run: npm run create-table
+
+      - name: Run resolver + lambda tests against DynamoDB Local
+        run: npm test
