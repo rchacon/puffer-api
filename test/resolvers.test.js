@@ -79,4 +79,12 @@ describe('createChildProfile + myChildren', () => {
     const childrenForB = await runUnitResolver(myChildren, ctxFor(parentB));
     expect(childrenForB).toHaveLength(0);
   });
+
+  it('createChildProfile.response surfaces a failed data source call instead of fabricating success', () => {
+    const ctx = {
+      ...ctxFor(randomUUID(), { input: { name: 'Ada', birthday: '2019-04-12' } }),
+      error: { message: 'ProvisionedThroughputExceededException', type: 'DynamoDB:ProvisionedThroughputExceededException' },
+    };
+    expect(() => createChildProfile.response(ctx)).toThrow('ProvisionedThroughputExceededException');
+  });
 });

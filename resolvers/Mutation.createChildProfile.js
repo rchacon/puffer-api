@@ -23,6 +23,9 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+  if (ctx.error) {
+    return util.error(ctx.error.message, ctx.error.type);
+  }
   return {
     id: ctx.stash.childId,
     parentId: ctx.identity.sub,
