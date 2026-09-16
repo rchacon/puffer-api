@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "create-table": "node scripts/create-table.js",
-    "seed": "node scripts/seed.js",
     "test": "vitest run"
   },
   "dependencies": {
