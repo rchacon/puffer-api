@@ -48,4 +48,14 @@ describe('postConfirmation trigger', () => {
     const result = await handler({ triggerSource: 'PreSignUp_SignUp', request: {} });
     expect(result.triggerSource).toBe('PreSignUp_SignUp');
   });
+
+  it('throws when the email attribute is missing', async () => {
+    const sub = randomUUID();
+    await expect(
+      handler({
+        triggerSource: 'PostConfirmation_ConfirmSignUp',
+        request: { userAttributes: { sub } },
+      })
+    ).rejects.toThrow(/email/i);
+  });
 });

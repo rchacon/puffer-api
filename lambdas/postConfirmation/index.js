@@ -23,6 +23,14 @@ export async function handler(event) {
 
   const { sub, email, name } = event.request.userAttributes;
 
+  // Parent.email is non-null in schema.graphql; a missing email here means the
+  // User Pool isn't configured to require/verify it, which is a config error
+  // worth failing sign-up over rather than silently writing a broken profile
+  // that only breaks later when myProfile is queried.
+  if (!email) {
+    throw new Error(`PostConfirmation event for sub ${sub} is missing the email attribute`);
+  }
+
   try {
     await client.send(
       new PutCommand({
@@ -30,7 +38,7 @@ export async function handler(event) {
         Item: {
           PK: parentPk(sub),
           SK: profileSk(),
-          email: email ?? null,
+          email,
           name: name ?? null,
           createdAt: new Date().toISOString(),
         },
