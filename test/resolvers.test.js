@@ -87,4 +87,12 @@ describe('createChildProfile + myChildren', () => {
     };
     expect(() => createChildProfile.response(ctx)).toThrow('ProvisionedThroughputExceededException');
   });
+
+  it('myChildren.response surfaces a failed data source call instead of crashing on ctx.result', () => {
+    const ctx = {
+      ...ctxFor(randomUUID()),
+      error: { message: 'ProvisionedThroughputExceededException', type: 'DynamoDB:ProvisionedThroughputExceededException' },
+    };
+    expect(() => myChildren.response(ctx)).toThrow('ProvisionedThroughputExceededException');
+  });
 });

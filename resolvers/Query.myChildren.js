@@ -15,6 +15,9 @@ export function request(ctx) {
 }
 
 export function response(ctx) {
+  if (ctx.error) {
+    return util.error(ctx.error.message, ctx.error.type);
+  }
   return ctx.result.items.map(({ PK, SK, ...rest }) => ({
     id: SK.slice('CHILD#'.length),
     parentId: ctx.identity.sub,
