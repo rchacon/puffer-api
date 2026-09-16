@@ -30,7 +30,7 @@ export async function handler(event) {
         Item: {
           PK: `PARENT#${sub}`,
           SK: 'PROFILE',
-          email,
+          email: email ?? null,
           name: name ?? null,
           createdAt: new Date().toISOString(),
         },
