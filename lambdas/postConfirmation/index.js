@@ -1,5 +1,6 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { parentPk, profileSk } from '../../resolvers/lib/keys.js';
 
 // DYNAMODB_ENDPOINT is only set for local dev/CI (DynamoDB Local); in a real deploy
 // it's unset and the SDK resolves the real regional endpoint + Lambda role creds.
@@ -28,8 +29,8 @@ export async function handler(event) {
       new PutCommand({
         TableName: TABLE_NAME,
         Item: {
-          PK: `PARENT#${sub}`,
-          SK: 'PROFILE',
+          PK: parentPk(sub),
+          SK: profileSk(),
           email: email ?? null,
           name: name ?? null,
           createdAt: new Date().toISOString(),
