@@ -16,6 +16,7 @@ export function request(ctx) {
     attributeValues: util.dynamodb.toMapValues({
       name: ctx.args.input.name,
       avatar: ctx.args.input.avatar ?? null,
+      birthday: ctx.args.input.birthday ?? null,
       createdAt,
     }),
   };
@@ -27,6 +28,7 @@ export function response(ctx) {
     parentId: ctx.identity.sub,
     name: ctx.args.input.name,
     avatar: ctx.args.input.avatar ?? null,
+    birthday: ctx.args.input.birthday ?? null,
     createdAt: ctx.stash.createdAt,
   };
 }

@@ -15,7 +15,7 @@ One table, generic `PK`/`SK`, plus `GSI1` for the portal's status-filtered query
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
-| Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
+| Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
 | Word progress | `CHILD#<childId>` | `WORD#<word>` | `status` (`IN_PROGRESS`/`NEEDS_SUPPORT`/`MASTERED`), `attempts`, `lastPracticedAt` |
 
 `GSI1PK = CHILD#<childId>`, `GSI1SK = STATUS#<status>#WORD#<word>` — only word-progress

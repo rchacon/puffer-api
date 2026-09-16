@@ -51,14 +51,30 @@ describe('createChildProfile + myChildren', () => {
 
     const created = await runUnitResolver(
       createChildProfile,
-      ctxFor(parentSub, { input: { name: 'Ada', avatar: 'fox' } })
+      ctxFor(parentSub, { input: { name: 'Ada', avatar: 'fox', birthday: '2019-04-12' } })
     );
     expect(created.name).toBe('Ada');
     expect(created.parentId).toBe(parentSub);
+    expect(created.birthday).toBe('2019-04-12');
 
     const children = await runUnitResolver(myChildren, ctxFor(parentSub));
     expect(children).toHaveLength(1);
-    expect(children[0]).toMatchObject({ id: created.id, name: 'Ada', avatar: 'fox' });
+    expect(children[0]).toMatchObject({
+      id: created.id,
+      name: 'Ada',
+      avatar: 'fox',
+      birthday: '2019-04-12',
+    });
+  });
+
+  it('allows creating a child without a birthday', async () => {
+    const parentSub = randomUUID();
+
+    const created = await runUnitResolver(
+      createChildProfile,
+      ctxFor(parentSub, { input: { name: 'Milo' } })
+    );
+    expect(created.birthday).toBeNull();
   });
 
   it('does not see another parent\'s children', async () => {
