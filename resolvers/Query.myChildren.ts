@@ -1,7 +1,11 @@
-import { util } from '@aws-appsync/utils';
+import { util, type DynamoDBQueryRequest } from '@aws-appsync/utils';
 import { parentPk } from './lib/keys.js';
+import type { Child, CognitoContext } from './lib/types.js';
 
-export function request(ctx) {
+type ChildItem = { PK: string; SK: string; name: string; avatar: string | null; birthday: string; createdAt: string };
+type QueryResult = { items: ChildItem[] };
+
+export function request(ctx: CognitoContext): DynamoDBQueryRequest {
   return {
     operation: 'Query',
     query: {
@@ -14,7 +18,7 @@ export function request(ctx) {
   };
 }
 
-export function response(ctx) {
+export function response(ctx: CognitoContext<Record<string, never>, Record<string, any>, QueryResult>): Child[] {
   if (ctx.error) {
     return util.error(ctx.error.message, ctx.error.type);
   }

@@ -1,7 +1,11 @@
-import { util } from '@aws-appsync/utils';
+import { util, type DynamoDBPutItemRequest } from '@aws-appsync/utils';
 import { parentPk, childSk } from './lib/keys.js';
+import type { Child, CognitoContext } from './lib/types.js';
 
-export function request(ctx) {
+type Args = { input: { name: string; avatar?: string | null; birthday: string } };
+type Stash = { childId: string; createdAt: string };
+
+export function request(ctx: CognitoContext<Args, Partial<Stash>>): DynamoDBPutItemRequest {
   const childId = util.autoId();
   const createdAt = util.time.nowISO8601();
   ctx.stash.childId = childId;
@@ -22,7 +26,7 @@ export function request(ctx) {
   };
 }
 
-export function response(ctx) {
+export function response(ctx: CognitoContext<Args, Stash>): Child {
   if (ctx.error) {
     return util.error(ctx.error.message, ctx.error.type);
   }

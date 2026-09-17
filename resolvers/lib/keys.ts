@@ -1,16 +1,16 @@
 // Partition key shared by a parent's own profile item and all of their child
 // items, so "parent + all children" is one Query on this PK (see myChildren).
-export function parentPk(sub) {
+export function parentPk(sub: string): string {
   return `PARENT#${sub}`;
 }
 
 // Sort key for the parent's own profile item within its PARENT# partition.
-export function profileSk() {
+export function profileSk(): string {
   return 'PROFILE';
 }
 
 // Sort key for a child item within its parent's PARENT# partition. Combined
 // with parentPk + begins_with(SK, 'CHILD#'), this is what myChildren queries.
-export function childSk(childId) {
+export function childSk(childId: string): string {
   return `CHILD#${childId}`;
 }

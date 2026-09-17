@@ -1,3 +1,4 @@
+import type { PostConfirmationConfirmSignUpTriggerEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { parentPk, profileSk } from '../../resolvers/lib/keys.js';
@@ -16,12 +17,18 @@ const client = DynamoDBDocumentClient.from(
   })
 );
 
-export async function handler(event) {
+export async function handler(
+  event: PostConfirmationConfirmSignUpTriggerEvent
+): Promise<PostConfirmationConfirmSignUpTriggerEvent> {
   if (event.triggerSource !== 'PostConfirmation_ConfirmSignUp') {
     return event;
   }
 
   const { sub, email, name } = event.request.userAttributes;
+
+  if (!sub) {
+    throw new Error('PostConfirmation event is missing the sub attribute');
+  }
 
   // Parent.email is non-null in schema.graphql; a missing email here means the
   // User Pool isn't configured to require/verify it, which is a config error
@@ -46,7 +53,7 @@ export async function handler(event) {
       })
     );
   } catch (err) {
-    if (err.name !== 'ConditionalCheckFailedException') {
+    if (!(err instanceof Error) || err.name !== 'ConditionalCheckFailedException') {
       throw err;
     }
     // Parent profile already exists (duplicate trigger invocation) — no-op.

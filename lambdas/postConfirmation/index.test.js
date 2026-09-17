@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { GetItemCommand } from '@aws-sdk/client-dynamodb';
 import { createTable } from '../../scripts/create-table.js';
 import { dynamoClient, TABLE_NAME, unmarshall } from '../../test/dynamoResolverHarness.js';
-import { handler } from './index.js';
+import { handler } from './index.ts';
 
 function confirmSignUpEvent(sub, email) {
   return {
