@@ -1,0 +1,91 @@
+name: deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+
+    env:
+      DYNAMODB_ENDPOINT: http://localhost:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag version matches package.json
+        id: version
+        run: scripts/check-tag-version.sh "$GITHUB_REF_NAME" v package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+
+      - name: Wait for DynamoDB Local
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null "$DYNAMODB_ENDPOINT"; then
+              echo "DynamoDB Local is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "DynamoDB Local did not become ready in time" >&2
+          exit 1
+
+      - name: Create DynamoDB table
+        run: npm run create-table
+
+      - name: Run tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build artifacts
+        run: npm run build
+
+      - name: Sanity-check the built Lambda imports cleanly
+        run: node -e "console.log('Imported handler OK:', typeof require('./build/lambda/postConfirmation/index.js').handler)"
+
+      - name: Check Lambda zip size against the 50MB direct-upload limit
+        run: |
+          size=$(stat -c%s build/lambda/postConfirmation.zip)
+          echo "postConfirmation.zip: $size bytes"
+          if [ "$size" -gt 52428800 ]; then
+            echo "::error::postConfirmation.zip exceeds Lambda's 50MB direct-upload limit ($size bytes). This needs an S3-upload path, not yet implemented."
+            exit 1
+          fi
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.PUFFER_API_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name "${{ vars.POST_CONFIRMATION_FUNCTION_NAME }}" \
+            --zip-file fileb://build/lambda/postConfirmation.zip
+          aws lambda wait function-updated \
+            --function-name "${{ vars.POST_CONFIRMATION_FUNCTION_NAME }}"
+
+      - name: Deploy AppSync (schema, resolvers, pipeline functions)
+        env:
+          APPSYNC_API_ID: ${{ vars.APPSYNC_API_ID }}
+          APPSYNC_DATA_SOURCE_NAME: ${{ vars.APPSYNC_DATA_SOURCE_NAME }}
+        run: scripts/deploy-appsync.sh
