@@ -11,4 +11,10 @@ npm install
 docker compose up -d
 npm run create-table
 npm test
+npm run typecheck
+npm run build   # bundles resolvers + zips the Lambda into build/
 ```
+
+Releases (tag `v<version>` matching `package.json`, e.g. `v0.2.0`) trigger
+`.github/workflows/deploy.yml`, which builds and deploys directly to AWS — see
+[docs/architecture.md](docs/architecture.md#deployment-pipeline).

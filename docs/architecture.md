@@ -69,14 +69,60 @@ their own parent/child/word items:
   the extra pipeline function — otherwise a parent could pass another family's
   `childId` and read or write their word-progress data.
 
-Resolvers are plain JS (`APPSYNC_JS` runtime) using `import { util } from
-'@aws-appsync/utils'` — the same pattern AWS's own docs and CDK bundling use. Note:
-that package ships only TypeScript types (`util` is an empty object outside AppSync's
-managed runtime); `puffer-infra`'s deploy step needs to bundle these resolvers
-(e.g. via esbuild) the same way AWS's CDK `AppsyncFunction`/`Code.fromAsset` does,
-which resolves `util` to the real runtime implementation at deploy time. Locally,
-`test/appsyncUtilShim.js` implements just the handful of `util.*` calls these
-resolvers use, wired in for tests only via `vitest.config.js`'s alias.
+Resolvers are TypeScript, using `import { util } from '@aws-appsync/utils'` — the
+same pattern AWS's own docs and CDK bundling use, and typed against that package's
+real `.d.ts` declarations (`Context`, `DynamoDBGetItemRequest`, etc. — see
+`resolvers/lib/types.ts`). Note: the package ships only types (`util` is an empty
+object outside AppSync's managed runtime); `scripts/build.mjs` bundles each resolver
+with esbuild, keeping `@aws-appsync/utils` external so the bare import survives into
+the built output for AppSync's runtime to resolve for real at deploy time — see
+"Deployment pipeline" below. Locally, `test/appsyncUtilShim.js` implements just the
+handful of `util.*` calls these resolvers use, wired in for tests only via
+`vitest.config.js`'s alias.
+
+## Deployment pipeline
+
+`.github/workflows/deploy.yml`, triggered on pushing a `v*` tag, matching the
+convention `cd-platform`'s `cd-api-deploy.yml`/`cd-server-deploy.yml` already use:
+one workflow builds artifacts *and* deploys them directly, via an OIDC-assumed AWS
+role — no GitHub Release, no artifact publishing, no Terraform-side version pin.
+Terraform (`puffer-infra`) provisions the AppSync API/data source/Lambda/IAM role
+*once*; this pipeline only ever pushes new code to what already exists:
+
+1. `scripts/check-tag-version.sh` fails the run if the pushed tag doesn't match
+   `package.json`'s `version` (mirrors `cd-platform`'s script, adapted from
+   `pyproject.toml` to `package.json`).
+2. Tests + `tsc --noEmit` run again here (not just relying on `main` already being
+   green), since a tag could in principle point at any commit.
+3. `scripts/build.mjs` bundles each resolver (esbuild, `@aws-appsync/utils` kept
+   external) into `build/resolvers/**/*.js`, bundles+zips the Lambda (CJS — the AWS
+   SDK's CJS internals don't survive esbuild's ESM output without an interop shim)
+   into `build/lambda/postConfirmation.zip`, and copies `schema.graphql`.
+4. A sanity check imports the built Lambda bundle and confirms `handler` is a
+   function, and a size check fails clearly if the zip would exceed Lambda's 50MB
+   direct-upload limit — both mirror `cd-api-deploy.yml`'s equivalent steps.
+5. `aws-actions/configure-aws-credentials` assumes an OIDC-trusted role
+   (`vars.PUFFER_API_DEPLOY_ROLE_ARN`), then:
+   - `aws lambda update-function-code` deploys the Lambda directly.
+   - `scripts/deploy-appsync.sh` deploys the schema (`start-schema-creation`, polled
+     via `get-schema-creation-status`) and every unit resolver
+     (`aws appsync update-resolver`, addressed by `TypeName.fieldName` read straight
+     from each built file's name) and pipeline function (`aws appsync
+     update-function`, addressed by a `functionId` looked up via `list-functions`
+     since AppSync assigns those, not us).
+
+Not yet handled: pipeline *resolvers* (as opposed to pipeline *functions*) — this
+repo doesn't have any yet, since word-progress (which needs
+`childWordProgress`/`recordWordAttempt` as pipeline resolvers) is still on a
+separate, unmerged branch. `deploy-appsync.sh` has a note marking where to add
+`--kind PIPELINE --pipeline-config functions=<id1>,<id2>` handling when that lands.
+
+This means `puffer-infra`'s Terraform needs to expose, as GitHub Actions repository
+variables on `puffer-api`: an OIDC-trusted IAM role ARN (permissions:
+`lambda:UpdateFunctionCode`, `lambda:GetFunction`, `appsync:StartSchemaCreation`,
+`appsync:GetSchemaCreationStatus`, `appsync:UpdateResolver`, `appsync:UpdateFunction`,
+`appsync:ListFunctions`) trusting `repo:rchacon/puffer-api:ref:refs/tags/v*`, plus the
+AWS region, the Lambda's function name, the AppSync API ID, and the data source name.
 
 ## Local development & testing
 
