@@ -15,6 +15,10 @@ npm run typecheck
 npm run build   # bundles resolvers + zips the Lambda into build/
 ```
 
-Releases (tag `v<version>` matching `package.json`, e.g. `v0.2.0`) trigger
-`.github/workflows/deploy.yml`, which builds and deploys directly to AWS — see
-[docs/architecture.md](docs/architecture.md#deployment-pipeline).
+The Lambda and the GraphQL app (schema + resolvers) are versioned and deployed
+independently — see [docs/architecture.md](docs/architecture.md#deployment-pipeline):
+
+- `postconfirmation-v<version>` (matching `lambdas/postConfirmation/VERSION`)
+  triggers `.github/workflows/deploy-postconfirmation.yml`.
+- `graphql-v<version>` (matching `package.json`'s `version`) triggers
+  `.github/workflows/deploy-graphql.yml`.
