@@ -82,47 +82,89 @@ handful of `util.*` calls these resolvers use, wired in for tests only via
 
 ## Deployment pipeline
 
-`.github/workflows/deploy.yml`, triggered on pushing a `v*` tag, matching the
-convention `cd-platform`'s `cd-api-deploy.yml`/`cd-server-deploy.yml` already use:
-one workflow builds artifacts *and* deploys them directly, via an OIDC-assumed AWS
-role — no GitHub Release, no artifact publishing, no Terraform-side version pin.
-Terraform (`puffer-infra`) provisions the AppSync API/data source/Lambda/IAM role
-*once*; this pipeline only ever pushes new code to what already exists:
+The Lambda and the GraphQL app (schema + resolvers) are versioned and deployed
+**independently** — different tag prefixes, different workflows, different deploy
+mechanisms — because they have genuinely different change profiles and risk
+shapes. Almost everything else (Cognito, DynamoDB, the AppSync API resource
+itself, the Lambda's shell, the custom domain) is **managed by Terraform** in
+`puffer-infra`, provisioned once and rarely touched again; these two pipelines
+only ever push new *code* to what Terraform already created.
 
-1. `scripts/check-tag-version.sh` fails the run if the pushed tag doesn't match
-   `package.json`'s `version` (mirrors `cd-platform`'s script, adapted from
-   `pyproject.toml` to `package.json`).
-2. Tests + `tsc --noEmit` run again here (not just relying on `main` already being
-   green), since a tag could in principle point at any commit.
-3. `scripts/build.mjs` bundles each resolver (esbuild, `@aws-appsync/utils` kept
-   external) into `build/resolvers/**/*.js`, bundles+zips the Lambda (CJS — the AWS
-   SDK's CJS internals don't survive esbuild's ESM output without an interop shim)
-   into `build/lambda/postConfirmation.zip`, and copies `schema.graphql`.
-4. A sanity check imports the built Lambda bundle and confirms `handler` is a
-   function, and a size check fails clearly if the zip would exceed Lambda's 50MB
+### `postconfirmation-v*` → `.github/workflows/deploy-postconfirmation.yml`
+
+Matches `cd-platform`'s `cd-api-deploy.yml`/`cd-server-deploy.yml` convention
+exactly: builds and deploys directly via an OIDC-assumed AWS role, no
+CloudFormation. Chosen deliberately, not by default — this Lambda's scope is
+narrow and stable (it only upserts a parent profile), so the added complexity of
+a rolling/canary deploy (Lambda aliases + AWS CodeDeploy + CloudWatch alarms —
+the actual AWS mechanism for gradual-traffic-shift-with-automatic-rollback,
+which plain CloudFormation does *not* give you just by deploying a Lambda
+through it) isn't justified here.
+
+1. `scripts/check-tag-version.sh` checks the tag against
+   `lambdas/postConfirmation/VERSION` (a bare version string, versioned
+   independently of the GraphQL app's `package.json` version).
+2. Tests + `tsc --noEmit` run again here (not just relying on `main` already
+   being green), since a tag could in principle point at any commit.
+3. `scripts/build.mjs` bundles the Lambda (CJS — the AWS SDK's CJS internals
+   don't survive esbuild's ESM output without an interop shim) into
+   `build/lambda/postConfirmation.zip`.
+4. A sanity check imports the built bundle and confirms `handler` is a function,
+   and a size check fails clearly if the zip would exceed Lambda's 50MB
    direct-upload limit — both mirror `cd-api-deploy.yml`'s equivalent steps.
-5. `aws-actions/configure-aws-credentials` assumes an OIDC-trusted role
-   (`vars.PUFFER_API_DEPLOY_ROLE_ARN`), then:
-   - `aws lambda update-function-code` deploys the Lambda directly.
-   - `scripts/deploy-appsync.sh` deploys the schema (`start-schema-creation`, polled
-     via `get-schema-creation-status`) and every unit resolver
-     (`aws appsync update-resolver`, addressed by `TypeName.fieldName` read straight
-     from each built file's name) and pipeline function (`aws appsync
-     update-function`, addressed by a `functionId` looked up via `list-functions`
-     since AppSync assigns those, not us).
+5. `aws lambda update-function-code` + `aws lambda wait function-updated`,
+   authenticated via an OIDC-assumed role (`vars.POSTCONFIRMATION_DEPLOY_ROLE_ARN`).
+
+### `graphql-v*` → `.github/workflows/deploy-graphql.yml`
+
+The schema + resolvers + pipeline functions are the one part of this system
+that's a genuine multi-resource batch update on every release (N independent
+resolvers/functions) — so it's the one part that actually benefits from
+CloudFormation's rollback-on-partial-apply-failure. CDK was seriously considered
+for this (to get that same rollback behavior) and dropped once it was clear the
+need was this narrowly scoped — a generated template covers it without a second
+IaC tool.
+
+1. `scripts/check-tag-version.sh` checks the tag against `package.json`'s
+   `version`.
+2. Tests + `tsc --noEmit`, same as above.
+3. `scripts/build.mjs` bundles each resolver (esbuild, `@aws-appsync/utils` kept
+   external so it resolves to AppSync's real runtime at deploy time) into
+   `build/resolvers/**/*.js`, and copies `schema.graphql`.
+4. `scripts/generate-appsync-template.mjs` generates `build/appsync-template.json`
+   — a CloudFormation template (JSON, not YAML: resolver code and the schema
+   definition are arbitrary multi-line strings, and `JSON.stringify` escapes
+   that unambiguously where hand-rolled YAML block scalars have real
+   indentation/escaping edge cases) covering just `AWS::AppSync::GraphQLSchema`
+   plus one `AWS::AppSync::Resolver` per built resolver file (addressed by
+   `TypeName.fieldName`, read straight from each file's name — so adding a
+   resolver needs no template-generation-code change) and one
+   `AWS::AppSync::FunctionConfiguration` per pipeline function file. It takes
+   `ApiId`/`DataSourceName` as plain template parameters — it never creates the
+   AppSync API or data source itself, those are Terraform's.
+5. `aws cloudformation deploy` applies that template, authenticated via a
+   separate OIDC-assumed role (`vars.GRAPHQL_DEPLOY_ROLE_ARN`).
 
 Not yet handled: pipeline *resolvers* (as opposed to pipeline *functions*) — this
 repo doesn't have any yet, since word-progress (which needs
 `childWordProgress`/`recordWordAttempt` as pipeline resolvers) is still on a
-separate, unmerged branch. `deploy-appsync.sh` has a note marking where to add
-`--kind PIPELINE --pipeline-config functions=<id1>,<id2>` handling when that lands.
+separate, unmerged branch. Those need `Kind: PIPELINE` +
+`PipelineConfig.Functions` on the generated `AWS::AppSync::Resolver` resource,
+referencing the already-generated function resources' `FunctionId`s —
+`scripts/generate-appsync-template.mjs` will need that case added when that
+branch lands.
 
-This means `puffer-infra`'s Terraform needs to expose, as GitHub Actions repository
-variables on `puffer-api`: an OIDC-trusted IAM role ARN (permissions:
-`lambda:UpdateFunctionCode`, `lambda:GetFunction`, `appsync:StartSchemaCreation`,
-`appsync:GetSchemaCreationStatus`, `appsync:UpdateResolver`, `appsync:UpdateFunction`,
-`appsync:ListFunctions`) trusting `repo:rchacon/puffer-api:ref:refs/tags/v*`, plus the
-AWS region, the Lambda's function name, the AppSync API ID, and the data source name.
+### What Terraform needs to expose
+
+For `postconfirmation-v*`: an OIDC-trusted role ARN (`lambda:UpdateFunctionCode`,
+`lambda:GetFunction`) trusted for
+`repo:rchacon/puffer-api:ref:refs/tags/postconfirmation-v*`, `AWS_REGION`, and
+the Lambda's function name.
+
+For `graphql-v*`: a separate OIDC-trusted role ARN (CloudFormation deploy
+permissions for the generated stack, plus the `appsync:*` actions its resources
+need) trusted for `repo:rchacon/puffer-api:ref:refs/tags/graphql-v*`, the
+AppSync API ID, and the data source name.
 
 ## Local development & testing
 
