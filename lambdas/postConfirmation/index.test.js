@@ -49,6 +49,24 @@ describe('postConfirmation trigger', () => {
     expect(result.triggerSource).toBe('PreSignUp_SignUp');
   });
 
+  it('no-ops on PostConfirmation_ConfirmForgotPassword, the other real trigger source for this same hook', async () => {
+    const sub = randomUUID();
+    const event = {
+      triggerSource: 'PostConfirmation_ConfirmForgotPassword',
+      request: { userAttributes: { sub, email: 'parent@example.com' } },
+    };
+    const result = await handler(event);
+    expect(result).toBe(event);
+
+    const { Item } = await dynamoClient.send(
+      new GetItemCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: { S: `PARENT#${sub}` }, SK: { S: 'PROFILE' } },
+      })
+    );
+    expect(Item).toBeUndefined();
+  });
+
   it('throws when the email attribute is missing', async () => {
     const sub = randomUUID();
     await expect(

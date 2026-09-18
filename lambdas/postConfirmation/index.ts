@@ -1,4 +1,4 @@
-import type { PostConfirmationConfirmSignUpTriggerEvent } from 'aws-lambda';
+import type { PostConfirmationTriggerEvent } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { parentPk, profileSk } from '../../resolvers/lib/keys.js';
@@ -18,8 +18,11 @@ const client = DynamoDBDocumentClient.from(
 );
 
 export async function handler(
-  event: PostConfirmationConfirmSignUpTriggerEvent
-): Promise<PostConfirmationConfirmSignUpTriggerEvent> {
+  event: PostConfirmationTriggerEvent
+): Promise<PostConfirmationTriggerEvent> {
+  // This trigger also fires for PostConfirmation_ConfirmForgotPassword, which
+  // this Lambda has nothing to do -- the type is the full union so this check
+  // is real narrowing, not a dead branch a future cleanup could remove.
   if (event.triggerSource !== 'PostConfirmation_ConfirmSignUp') {
     return event;
   }
