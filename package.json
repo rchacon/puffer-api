@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "create-table": "node scripts/create-table.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.665.0",
