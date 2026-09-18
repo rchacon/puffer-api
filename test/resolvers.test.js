@@ -3,9 +3,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { createTable } from '../scripts/create-table.js';
 import { dynamoClient, marshall, runUnitResolver, TABLE_NAME } from './dynamoResolverHarness.js';
-import * as myProfile from '../resolvers/Query.myProfile.js';
-import * as myChildren from '../resolvers/Query.myChildren.js';
-import * as createChildProfile from '../resolvers/Mutation.createChildProfile.js';
+import * as myProfile from '../resolvers/Query.myProfile.ts';
+import * as myChildren from '../resolvers/Query.myChildren.ts';
+import * as createChildProfile from '../resolvers/Mutation.createChildProfile.ts';
 
 function ctxFor(sub, args = {}) {
   return { identity: { sub }, args, stash: {} };

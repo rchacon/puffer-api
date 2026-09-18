@@ -44,3 +44,6 @@ jobs:
 
       - name: Run resolver + lambda tests against DynamoDB Local
         run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
