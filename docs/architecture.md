@@ -18,11 +18,11 @@ follow-up (see below).
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `selectedAnswer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
-comparing `selectedAnswer` to `target` (case/whitespace-insensitive). Status
+comparing `answer` to `target` (case/whitespace-insensitive). Status
 (`IN_PROGRESS`/`NEEDS_SUPPORT`/`MASTERED`) and attempt counts will be *derived* from
 this history, so the rule can change later without losing the evidence behind any status.
 Every attempt is kept, including the options presented, because the "close decoy"
@@ -37,7 +37,7 @@ algorithm may change.
   server's; `occurredAt` is rejected if more than 5 minutes in the future or 30 days
   old.
 - **Idempotent retries:** the client supplies `attemptId` and `occurredAt`, so a retry
-  maps to the same key. `findAttempt` reads that key first; if the attempt exists,
+  maps to the same key. `prepareAttempt` reads that key first; if the attempt exists,
   `recordAttempt` returns it (`runtime.earlyReturn`) instead of writing, or raises
   `Conflict` if the same `attemptId` came back with a different answer. The write
   itself is conditional (`attribute_not_exists(PK)`) so a concurrent duplicate can't
@@ -97,7 +97,7 @@ their own parent/child items and their children's attempts:
   parent partition.
 - `Mutation.recordAttempt` — **pipeline** resolver: `functions/verifyChildOwnership.js`
   runs first and raises a `NotFound` error unless the given `childId` belongs to the
-  caller, then `functions/findAttempt.js` validates the input and looks for an existing
+  caller, then `functions/prepareAttempt.js` validates the input and looks for an existing
   attempt with the same key, then `functions/recordAttempt.js` writes it (or returns the
   existing one). A single-step resolver can't check-then-act in one round trip, so
   ownership verification needs the extra pipeline function — otherwise a parent could
@@ -190,7 +190,7 @@ Pipeline *resolvers* (as opposed to pipeline *functions*) — `recordAttempt` �
 `generate-appsync-template.mjs` tells the two apart by dynamically importing each
 built resolver module and checking for a `pipelineFunctions` export (e.g.
 `resolvers/Mutation.recordAttempt.ts` exports `pipelineFunctions =
-['verifyChildOwnership', 'findAttempt', 'recordAttempt']`) — present means `PIPELINE`, with
+['verifyChildOwnership', 'prepareAttempt', 'recordAttempt']`) — present means `PIPELINE`, with
 `PipelineConfig.Functions` built from `Fn::GetAtt`ing each named function's
 `FunctionId` (no explicit `DependsOn` on those functions needed; the `Fn::GetAtt`
 references already create that dependency implicitly — `cfn-lint` caught this

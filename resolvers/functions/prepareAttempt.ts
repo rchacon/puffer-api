@@ -1,6 +1,6 @@
 import { util, type DynamoDBGetItemRequest } from '@aws-appsync/utils';
 import { childPk, attemptSk } from '../lib/keys.js';
-import { normalizeAnswer } from '../lib/attempt.js';
+import { normalizeText } from '../lib/attempt.js';
 import type { AttemptItem, AttemptStash, CognitoContext, RecordAttemptInput } from '../lib/types.js';
 
 type Args = { input: RecordAttemptInput };
@@ -22,7 +22,7 @@ function invalid(message: string): never {
 // attempt with the same key so recordAttempt can return it instead of writing
 // a duplicate.
 export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptStash>>): DynamoDBGetItemRequest {
-  const { attemptId, activity, target, challengeType, selectedAnswer, presentedOptions, occurredAt } = ctx.args.input;
+  const { attemptId, activity, target, challengeType, answer, presentedOptions, occurredAt } = ctx.args.input;
 
   // '#' delimits the attempt sort key's segments, so it can't appear in them.
   if (attemptId.length < 8 || attemptId.length > MAX_TEXT_LENGTH || attemptId.includes('#')) {
@@ -31,25 +31,25 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
   if (target.length < 1 || target.length > MAX_TEXT_LENGTH || target.includes('#')) {
     invalid(`target must be 1-${MAX_TEXT_LENGTH} characters and not contain '#'`);
   }
-  if (selectedAnswer.length > MAX_TEXT_LENGTH) {
-    invalid(`selectedAnswer must be at most ${MAX_TEXT_LENGTH} characters`);
+  if (answer.length > MAX_TEXT_LENGTH) {
+    invalid(`answer must be at most ${MAX_TEXT_LENGTH} characters`);
   }
 
-  const normalizedTarget = normalizeAnswer(target);
-  const answer = normalizeAnswer(selectedAnswer);
+  const normalizedTarget = normalizeText(target);
+  const normalizedAnswer = normalizeText(answer);
   if (challengeType === 'MULTIPLE_CHOICE') {
     if (!presentedOptions || presentedOptions.length < 2 || presentedOptions.length > MAX_OPTIONS) {
       invalid(`presentedOptions must have 2-${MAX_OPTIONS} entries for MULTIPLE_CHOICE`);
     }
-    const options = presentedOptions.map(normalizeAnswer);
+    const options = presentedOptions.map(normalizeText);
     if (presentedOptions.some((o) => o.length > MAX_TEXT_LENGTH)) {
       invalid(`each presented option must be at most ${MAX_TEXT_LENGTH} characters`);
     }
     if (!options.includes(normalizedTarget)) {
       invalid('presentedOptions must include the target');
     }
-    if (!options.includes(answer)) {
-      invalid('selectedAnswer must be one of presentedOptions');
+    if (!options.includes(normalizedAnswer)) {
+      invalid('answer must be one of presentedOptions');
     }
   } else if (presentedOptions) {
     invalid(`presentedOptions is not allowed for ${challengeType}`);
@@ -64,7 +64,7 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
   const canonicalOccurredAt = util.time.epochMilliSecondsToISO8601(occurredAtMs);
 
   const sk = attemptSk(activity, target, canonicalOccurredAt, attemptId);
-  ctx.stash.attempt = { sk, occurredAt: canonicalOccurredAt, correct: answer === normalizedTarget };
+  ctx.stash.attempt = { sk, occurredAt: canonicalOccurredAt, correct: normalizedAnswer === normalizedTarget };
 
   return {
     operation: 'GetItem',

@@ -1,7 +1,7 @@
 import type { Attempt, AttemptItem } from './types.js';
 
-// Case/whitespace-insensitive comparison key for answers and options.
-export function normalizeAnswer(s: string): string {
+// Case/whitespace-insensitive comparison key for answers, targets and options.
+export function normalizeText(s: string): string {
   return s.trim().toLowerCase();
 }
 

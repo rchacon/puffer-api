@@ -51,7 +51,7 @@ input RecordAttemptInput {
   activity: Activity!
   target: String!
   challengeType: ChallengeType!
-  selectedAnswer: String!
+  answer: String!
   presentedOptions: [String!]
   occurredAt: AWSDateTime!
 }

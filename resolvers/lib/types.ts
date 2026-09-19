@@ -64,13 +64,13 @@ export interface RecordAttemptInput {
   activity: Activity;
   target: string;
   challengeType: ChallengeType;
-  selectedAnswer: string;
+  answer: string;
   presentedOptions?: string[] | null;
   occurredAt: string;
 }
 
 // Shape of an immutable attempt item as stored in DynamoDB (see attemptSk).
-// `selectedAnswer`/`presentedOptions` are kept as evidence but aren't part of
+// `answer`/`presentedOptions` are kept as evidence but aren't part of
 // the GraphQL Attempt type.
 export interface AttemptItem {
   PK: string;
@@ -80,12 +80,12 @@ export interface AttemptItem {
   activity: Activity;
   target: string;
   challengeType: ChallengeType;
-  selectedAnswer: string;
+  answer: string;
   presentedOptions?: string[];
   correct: boolean;
   occurredAt: string;
   receivedAt: string;
 }
 
-// Values findAttempt validates/derives once, for recordAttempt to reuse.
+// Values prepareAttempt validates/derives once, for recordAttempt to reuse.
 export type AttemptStash = { attempt: { sk: string; occurredAt: string; correct: boolean } };

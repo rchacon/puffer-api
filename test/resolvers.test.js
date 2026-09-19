@@ -15,7 +15,7 @@ import * as myChildren from '../resolvers/Query.myChildren.ts';
 import * as createChildProfile from '../resolvers/Mutation.createChildProfile.ts';
 import * as verifyChildOwnership from '../resolvers/functions/verifyChildOwnership.ts';
 import * as recordAttemptMutation from '../resolvers/Mutation.recordAttempt.ts';
-import * as findAttempt from '../resolvers/functions/findAttempt.ts';
+import * as prepareAttempt from '../resolvers/functions/prepareAttempt.ts';
 import * as recordAttempt from '../resolvers/functions/recordAttempt.ts';
 
 function ctxFor(sub, args = {}) {
@@ -109,7 +109,7 @@ describe('createChildProfile + myChildren', () => {
 });
 
 describe('recordAttempt (pipeline)', () => {
-  const pipeline = [verifyChildOwnership, findAttempt, recordAttempt];
+  const pipeline = [verifyChildOwnership, prepareAttempt, recordAttempt];
 
   async function newChild(parentSub) {
     return runUnitResolver(createChildProfile, ctxFor(parentSub, { input: { name: 'Rio' } }));
@@ -122,7 +122,7 @@ describe('recordAttempt (pipeline)', () => {
       activity: 'SIGHT_WORD',
       target: 'whale',
       challengeType: 'SPELL',
-      selectedAnswer: 'whale',
+      answer: 'whale',
       occurredAt: new Date().toISOString(),
       ...overrides,
     };
@@ -147,14 +147,14 @@ describe('recordAttempt (pipeline)', () => {
     const parentSub = randomUUID();
     const child = await newChild(parentSub);
 
-    const right = await record(parentSub, attemptInput(child.id, { selectedAnswer: '  Whale ' }));
+    const right = await record(parentSub, attemptInput(child.id, { answer: '  Whale ' }));
     expect(right).toMatchObject({ childId: child.id, target: 'whale', challengeType: 'SPELL', correct: true });
 
     const wrong = await record(
       parentSub,
       attemptInput(child.id, {
         challengeType: 'MULTIPLE_CHOICE',
-        selectedAnswer: 'otter',
+        answer: 'otter',
         presentedOptions: ['whale', 'otter', 'seal'],
       })
     );
@@ -165,7 +165,7 @@ describe('recordAttempt (pipeline)', () => {
     expect(items).toHaveLength(2);
     const stored = items.map((i) => ({ ...unmarshall(i) }));
     expect(stored.find((i) => i.id === wrong.id)).toMatchObject({
-      selectedAnswer: 'otter',
+      answer: 'otter',
       presentedOptions: ['whale', 'otter', 'seal'],
     });
   });
@@ -201,19 +201,19 @@ describe('recordAttempt (pipeline)', () => {
     const input = attemptInput(child.id);
 
     await record(parentSub, input);
-    await expect(record(parentSub, { ...input, selectedAnswer: 'wale' })).rejects.toThrow('already used');
+    await expect(record(parentSub, { ...input, answer: 'wale' })).rejects.toThrow('already used');
   });
 
   it.each([
-    ['multiple choice without options', { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'whale' }, 'presentedOptions'],
+    ['multiple choice without options', { challengeType: 'MULTIPLE_CHOICE', answer: 'whale' }, 'presentedOptions'],
     [
       'options missing the target',
-      { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'otter', presentedOptions: ['otter', 'seal'] },
+      { challengeType: 'MULTIPLE_CHOICE', answer: 'otter', presentedOptions: ['otter', 'seal'] },
       'include the target',
     ],
     [
       'answer not among the options',
-      { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'crab', presentedOptions: ['whale', 'otter'] },
+      { challengeType: 'MULTIPLE_CHOICE', answer: 'crab', presentedOptions: ['whale', 'otter'] },
       'one of presentedOptions',
     ],
     ['spell with options', { presentedOptions: ['whale', 'otter'] }, 'not allowed'],

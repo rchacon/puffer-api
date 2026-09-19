@@ -5,18 +5,18 @@ import type { Attempt, AttemptItem, AttemptStash, CognitoContext, RecordAttemptI
 
 type Args = { input: RecordAttemptInput };
 
-// Writes the immutable attempt item. Runs after findAttempt, which already
+// Writes the immutable attempt item. Runs after prepareAttempt, which already
 // validated the input and stashed the key and `correct`.
 export function request(
   ctx: CognitoContext<Args, unknown, { result: AttemptItem | null }, AttemptStash>
 ): DynamoDBPutItemRequest {
-  const { attemptId, childId, activity, target, challengeType, selectedAnswer, presentedOptions } = ctx.args.input;
+  const { attemptId, childId, activity, target, challengeType, answer, presentedOptions } = ctx.args.input;
 
   // Retry of an attempt we already recorded: hand back the stored one, don't
   // write a second. The same attemptId with different contents is a client bug.
   const existing = ctx.prev.result;
   if (existing) {
-    if (existing.selectedAnswer !== selectedAnswer || existing.challengeType !== challengeType) {
+    if (existing.answer !== answer || existing.challengeType !== challengeType) {
       util.error(`attemptId ${attemptId} was already used for a different attempt`, 'Conflict');
     }
     runtime.earlyReturn(toAttempt(existing));
@@ -29,7 +29,7 @@ export function request(
     activity,
     target,
     challengeType,
-    selectedAnswer,
+    answer,
     correct,
     occurredAt,
     receivedAt: util.time.nowISO8601(),
@@ -42,7 +42,7 @@ export function request(
     operation: 'PutItem',
     key: util.dynamodb.toMapValues({ PK: childPk(childId), SK: sk }),
     attributeValues: util.dynamodb.toMapValues(item),
-    // Guards the window between findAttempt's read and this write: a
+    // Guards the window between prepareAttempt's read and this write: a
     // concurrent duplicate fails here (the client's retry then hits the
     // early return above) instead of overwriting the stored attempt.
     condition: { expression: 'attribute_not_exists(PK)' },
