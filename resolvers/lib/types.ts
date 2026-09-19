@@ -9,11 +9,14 @@ export type Empty = Record<string, never>;
 
 // This API is Cognito User Pool-authorized only, so narrow the real (much
 // wider) Context['identity'] union down to the one shape we actually get.
+// TStash trails since it's never customized at any call site in this repo --
+// trailing is what lets callers skip it and still reach TResult/TPrev, since
+// TS generic parameters are positional, not named.
 export type CognitoContext<
   TArgs = Empty,
-  TStash extends Record<string, any> = Record<string, any>,
   TResult = any,
   TPrev extends Record<string, any> | undefined = any,
+  TStash extends Record<string, any> = Record<string, any>,
 > = Omit<Context<TArgs, TStash, TPrev, undefined, TResult>, 'identity'> & {
   identity: AppSyncIdentityCognito;
 };

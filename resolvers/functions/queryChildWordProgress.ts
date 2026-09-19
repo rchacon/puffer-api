@@ -26,7 +26,7 @@ export function request(ctx: CognitoContext<Args>): DynamoDBQueryRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Args, Record<string, any>, QueryResult>): WordProgress[] {
+export function response(ctx: CognitoContext<Args, QueryResult>): WordProgress[] {
   return ctx.result.items.map(({ PK, SK, GSI1PK, GSI1SK, ...rest }) => ({
     childId: ctx.args.childId,
     word: SK.slice('WORD#'.length),

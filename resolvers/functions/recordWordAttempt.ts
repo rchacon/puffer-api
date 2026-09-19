@@ -30,7 +30,7 @@ export function request(ctx: CognitoContext<Args>): DynamoDBUpdateItemRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Args, Record<string, any>, WordItem>): WordProgress {
+export function response(ctx: CognitoContext<Args, WordItem>): WordProgress {
   const { PK, SK, GSI1PK, GSI1SK, ...rest } = ctx.result;
   return { childId: ctx.args.childId, word: ctx.args.word, ...rest };
 }

@@ -18,7 +18,7 @@ export function request(ctx: CognitoContext): DynamoDBQueryRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Empty, Record<string, any>, QueryResult>): Child[] {
+export function response(ctx: CognitoContext<Empty, QueryResult>): Child[] {
   if (ctx.error) {
     return util.error(ctx.error.message, ctx.error.type);
   }

@@ -9,6 +9,6 @@ export function request(ctx: CognitoContext): Empty {
   return {};
 }
 
-export function response(ctx: CognitoContext<Empty, Record<string, any>, unknown, { result: WordProgress[] }>): WordProgress[] {
+export function response(ctx: CognitoContext<Empty, unknown, { result: WordProgress[] }>): WordProgress[] {
   return ctx.prev.result;
 }

@@ -14,7 +14,7 @@ export function request(ctx: CognitoContext<Args>): DynamoDBGetItemRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Args, Record<string, any>, Record<string, unknown> | null>) {
+export function response(ctx: CognitoContext<Args, Record<string, unknown> | null>) {
   if (!ctx.result) {
     util.error(`Child ${ctx.args.childId} not found for this parent`, 'NotFound');
   }

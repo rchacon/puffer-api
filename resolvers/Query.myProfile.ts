@@ -14,7 +14,7 @@ export function request(ctx: CognitoContext): DynamoDBGetItemRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Empty, Record<string, any>, ParentItem | null>): Parent | null {
+export function response(ctx: CognitoContext<Empty, ParentItem | null>): Parent | null {
   if (!ctx.result) {
     return null;
   }
