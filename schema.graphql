@@ -14,24 +14,29 @@ type Child {
   createdAt: AWSDateTime!
 }
 
-enum WordStatus {
-  IN_PROGRESS
-  NEEDS_SUPPORT
-  MASTERED
+enum Activity {
+  SIGHT_WORD
 }
 
-type WordProgress {
+enum ChallengeType {
+  CHOOSE_FROM_BANK
+  SPELL
+}
+
+type Attempt {
+  id: ID!
   childId: ID!
-  word: String!
-  status: WordStatus!
-  attempts: Int!
-  lastPracticedAt: AWSDateTime!
+  activity: Activity!
+  targetId: ID!
+  challengeType: ChallengeType!
+  correct: Boolean!
+  occurredAt: AWSDateTime!
+  receivedAt: AWSDateTime!
 }
 
 type Query {
   myProfile: Parent
   myChildren: [Child!]!
-  childWordProgress(childId: ID!, status: WordStatus): [WordProgress!]!
 }
 
 input CreateChildProfileInput {
@@ -40,9 +45,20 @@ input CreateChildProfileInput {
   birthday: AWSDate!
 }
 
+input RecordAttemptInput {
+  attemptId: ID!
+  childId: ID!
+  activity: Activity!
+  targetId: ID!
+  challengeType: ChallengeType!
+  selectedAnswer: String!
+  presentedOptions: [String!]
+  occurredAt: AWSDateTime!
+}
+
 type Mutation {
   createChildProfile(input: CreateChildProfileInput!): Child!
-  recordWordAttempt(childId: ID!, word: String!, status: WordStatus!): WordProgress!
+  recordAttempt(input: RecordAttemptInput!): Attempt!
 }
 
 schema {

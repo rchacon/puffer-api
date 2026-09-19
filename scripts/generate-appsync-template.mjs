@@ -75,7 +75,7 @@ for (const file of readdirSync(resolversDir).filter((f) => f.endsWith('.js'))) {
   const code = readFileSync(filePath, 'utf8');
 
   // A resolver whose module exports `pipelineFunctions` is a PIPELINE
-  // resolver (see resolvers/Mutation.recordWordAttempt.ts for why) -- it
+  // resolver (see resolvers/Mutation.recordAttempt.ts for why) -- it
   // chains functions instead of talking to a data source directly.
   const mod = await import(pathToFileURL(resolve(filePath)).href);
   const pipelineFunctions = mod.pipelineFunctions;

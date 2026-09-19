@@ -1,22 +1,22 @@
 import { util, type DynamoDBGetItemRequest } from '@aws-appsync/utils';
 import { parentPk, childSk } from '../lib/keys.js';
-import type { CognitoContext } from '../lib/types.js';
+import type { CognitoContext, Empty } from '../lib/types.js';
 
-type Args = { childId: string };
+type Stash = { childId: string };
 
-export function request(ctx: CognitoContext<Args>): DynamoDBGetItemRequest {
+export function request(ctx: CognitoContext<Empty, unknown, any, Stash>): DynamoDBGetItemRequest {
   return {
     operation: 'GetItem',
     key: util.dynamodb.toMapValues({
       PK: parentPk(ctx.identity.sub),
-      SK: childSk(ctx.args.childId),
+      SK: childSk(ctx.stash.childId),
     }),
   };
 }
 
-export function response(ctx: CognitoContext<Args, Record<string, unknown> | null>) {
+export function response(ctx: CognitoContext<Empty, Record<string, unknown> | null, any, Stash>) {
   if (!ctx.result) {
-    util.error(`Child ${ctx.args.childId} not found for this parent`, 'NotFound');
+    util.error(`Child ${ctx.stash.childId} not found for this parent`, 'NotFound');
   }
   return ctx.result;
 }

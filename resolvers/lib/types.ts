@@ -39,14 +39,53 @@ export interface Child {
   createdAt: string;
 }
 
-// Mirrors the WordStatus enum in schema.graphql.
-export type WordStatus = 'IN_PROGRESS' | 'NEEDS_SUPPORT' | 'MASTERED';
+// Mirrors the Activity enum in schema.graphql.
+export type Activity = 'SIGHT_WORD';
 
-// Mirrors the WordProgress type in schema.graphql.
-export interface WordProgress {
+// Mirrors the ChallengeType enum in schema.graphql.
+export type ChallengeType = 'CHOOSE_FROM_BANK' | 'SPELL';
+
+// Mirrors the Attempt type in schema.graphql.
+export interface Attempt {
+  id: string;
   childId: string;
-  word: string;
-  status: WordStatus;
-  attempts: number;
-  lastPracticedAt: string;
+  activity: Activity;
+  targetId: string;
+  challengeType: ChallengeType;
+  correct: boolean;
+  occurredAt: string;
+  receivedAt: string;
 }
+
+// Mirrors the RecordAttemptInput input in schema.graphql.
+export interface RecordAttemptInput {
+  attemptId: string;
+  childId: string;
+  activity: Activity;
+  targetId: string;
+  challengeType: ChallengeType;
+  selectedAnswer: string;
+  presentedOptions?: string[] | null;
+  occurredAt: string;
+}
+
+// Shape of an immutable attempt item as stored in DynamoDB (see attemptSk).
+// `selectedAnswer`/`presentedOptions` are kept as evidence but aren't part of
+// the GraphQL Attempt type.
+export interface AttemptItem {
+  PK: string;
+  SK: string;
+  id: string;
+  childId: string;
+  activity: Activity;
+  targetId: string;
+  challengeType: ChallengeType;
+  selectedAnswer: string;
+  presentedOptions?: string[];
+  correct: boolean;
+  occurredAt: string;
+  receivedAt: string;
+}
+
+// Values findAttempt validates/derives once, for recordAttempt to reuse.
+export type AttemptStash = { attempt: { sk: string; occurredAt: string; correct: boolean } };

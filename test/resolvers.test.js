@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { createTable } from '../scripts/create-table.js';
 import {
   dynamoClient,
   marshall,
+  unmarshall,
   runPipelineResolver,
   runUnitResolver,
   TABLE_NAME,
@@ -13,8 +14,9 @@ import * as myProfile from '../resolvers/Query.myProfile.ts';
 import * as myChildren from '../resolvers/Query.myChildren.ts';
 import * as createChildProfile from '../resolvers/Mutation.createChildProfile.ts';
 import * as verifyChildOwnership from '../resolvers/functions/verifyChildOwnership.ts';
-import * as recordWordAttempt from '../resolvers/functions/recordWordAttempt.ts';
-import * as queryChildWordProgress from '../resolvers/functions/queryChildWordProgress.ts';
+import * as recordAttemptMutation from '../resolvers/Mutation.recordAttempt.ts';
+import * as findAttempt from '../resolvers/functions/findAttempt.ts';
+import * as recordAttempt from '../resolvers/functions/recordAttempt.ts';
 
 function ctxFor(sub, args = {}) {
   return { identity: { sub }, args, stash: {} };
@@ -106,58 +108,133 @@ describe('createChildProfile + myChildren', () => {
   });
 });
 
-describe('recordWordAttempt + childWordProgress (pipeline)', () => {
-  it('records a word attempt and surfaces it via the status-filtered query', async () => {
+describe('recordAttempt (pipeline)', () => {
+  const pipeline = [verifyChildOwnership, findAttempt, recordAttempt];
+
+  async function newChild(parentSub) {
+    return runUnitResolver(createChildProfile, ctxFor(parentSub, { input: { name: 'Rio' } }));
+  }
+
+  function attemptInput(childId, overrides = {}) {
+    return {
+      attemptId: randomUUID(),
+      childId,
+      activity: 'SIGHT_WORD',
+      targetId: 'whale',
+      challengeType: 'SPELL',
+      selectedAnswer: 'whale',
+      occurredAt: new Date().toISOString(),
+      ...overrides,
+    };
+  }
+
+  function record(parentSub, input) {
+    return runPipelineResolver(pipeline, ctxFor(parentSub, { input }), recordAttemptMutation);
+  }
+
+  async function storedAttempts(childId) {
+    const { Items } = await dynamoClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+        ExpressionAttributeValues: marshall({ ':pk': `CHILD#${childId}`, ':prefix': 'ATTEMPT#' }),
+      })
+    );
+    return Items ?? [];
+  }
+
+  it('judges correctness server-side and keeps the attempt as evidence', async () => {
     const parentSub = randomUUID();
-    const child = await runUnitResolver(
-      createChildProfile,
-      ctxFor(parentSub, { input: { name: 'Rio' } })
-    );
+    const child = await newChild(parentSub);
 
-    const attempt1 = await runPipelineResolver(
-      [verifyChildOwnership, recordWordAttempt],
-      ctxFor(parentSub, { childId: child.id, word: 'whale', status: 'NEEDS_SUPPORT' })
-    );
-    expect(attempt1).toMatchObject({ word: 'whale', status: 'NEEDS_SUPPORT', attempts: 1 });
+    const right = await record(parentSub, attemptInput(child.id, { selectedAnswer: '  Whale ' }));
+    expect(right).toMatchObject({ childId: child.id, targetId: 'whale', challengeType: 'SPELL', correct: true });
 
-    // Second attempt on the same word increments attempts and can change status.
-    const attempt2 = await runPipelineResolver(
-      [verifyChildOwnership, recordWordAttempt],
-      ctxFor(parentSub, { childId: child.id, word: 'whale', status: 'MASTERED' })
+    const wrong = await record(
+      parentSub,
+      attemptInput(child.id, {
+        challengeType: 'CHOOSE_FROM_BANK',
+        selectedAnswer: 'otter',
+        presentedOptions: ['whale', 'otter', 'seal'],
+      })
     );
-    expect(attempt2).toMatchObject({ word: 'whale', status: 'MASTERED', attempts: 2 });
+    expect(wrong.correct).toBe(false);
+    expect(wrong.receivedAt).toEqual(expect.any(String));
 
-    await runPipelineResolver(
-      [verifyChildOwnership, recordWordAttempt],
-      ctxFor(parentSub, { childId: child.id, word: 'otter', status: 'NEEDS_SUPPORT' })
-    );
-
-    const needsSupport = await runPipelineResolver(
-      [verifyChildOwnership, queryChildWordProgress],
-      ctxFor(parentSub, { childId: child.id, status: 'NEEDS_SUPPORT' })
-    );
-    expect(needsSupport.map((w) => w.word)).toEqual(['otter']);
-
-    const all = await runPipelineResolver(
-      [verifyChildOwnership, queryChildWordProgress],
-      ctxFor(parentSub, { childId: child.id })
-    );
-    expect(all.map((w) => w.word).sort()).toEqual(['otter', 'whale']);
+    const items = await storedAttempts(child.id);
+    expect(items).toHaveLength(2);
+    const stored = items.map((i) => ({ ...unmarshall(i) }));
+    expect(stored.find((i) => i.id === wrong.id)).toMatchObject({
+      selectedAnswer: 'otter',
+      presentedOptions: ['whale', 'otter', 'seal'],
+    });
   });
 
-  it('rejects recording a word attempt against a child that is not the caller\'s', async () => {
+  it('is idempotent: retrying the same attempt returns the stored one without a duplicate', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const input = attemptInput(child.id);
+
+    const first = await record(parentSub, input);
+    const retry = await record(parentSub, input);
+
+    expect(retry).toEqual(first);
+    expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('treats equivalent occurredAt spellings as the same attempt', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const at = new Date(Date.now() - 60_000);
+    const input = attemptInput(child.id, { occurredAt: at.toISOString() });
+
+    const first = await record(parentSub, input);
+    const retry = await record(parentSub, { ...input, occurredAt: at.toISOString().replace('Z', '+00:00') });
+
+    expect(retry).toEqual(first);
+    expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('rejects reusing an attemptId for a different answer', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const input = attemptInput(child.id);
+
+    await record(parentSub, input);
+    await expect(record(parentSub, { ...input, selectedAnswer: 'wale' })).rejects.toThrow('already used');
+  });
+
+  it.each([
+    ['choose without options', { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'whale' }, 'presentedOptions'],
+    [
+      'options missing the target',
+      { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'otter', presentedOptions: ['otter', 'seal'] },
+      'include the target',
+    ],
+    [
+      'answer not among the options',
+      { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'crab', presentedOptions: ['whale', 'otter'] },
+      'one of presentedOptions',
+    ],
+    ['spell with options', { presentedOptions: ['whale', 'otter'] }, 'not allowed'],
+    ['target containing #', { targetId: 'wha#le' }, 'targetId'],
+    ['short attemptId', { attemptId: 'abc' }, 'attemptId'],
+    ['occurredAt in the future', { occurredAt: new Date(Date.now() + 3_600_000).toISOString() }, 'window'],
+    ['occurredAt too old', { occurredAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }, 'window'],
+  ])('rejects invalid input: %s', async (_name, overrides, message) => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+
+    await expect(record(parentSub, attemptInput(child.id, overrides))).rejects.toThrow(message);
+    expect(await storedAttempts(child.id)).toHaveLength(0);
+  });
+
+  it('rejects recording an attempt against a child that is not the caller\'s', async () => {
     const owner = randomUUID();
     const attacker = randomUUID();
-    const child = await runUnitResolver(
-      createChildProfile,
-      ctxFor(owner, { input: { name: 'Sam' } })
-    );
+    const child = await newChild(owner);
 
-    await expect(
-      runPipelineResolver(
-        [verifyChildOwnership, recordWordAttempt],
-        ctxFor(attacker, { childId: child.id, word: 'whale', status: 'MASTERED' })
-      )
-    ).rejects.toThrow();
+    await expect(record(attacker, attemptInput(child.id))).rejects.toThrow('not found');
+    expect(await storedAttempts(child.id)).toHaveLength(0);
   });
 });
