@@ -29,6 +29,6 @@ export function childPk(childId: string): string {
 // rule will need) is a single begins_with Query, then occurredAt (canonical
 // UTC ISO-8601, so it sorts chronologically) and attemptId, which makes a
 // retried recordAttempt land on the same key instead of creating a duplicate.
-export function attemptSk(activity: Activity, targetId: string, occurredAt: string, attemptId: string): string {
-  return `ATTEMPT#${activity}#${targetId}#${occurredAt}#${attemptId}`;
+export function attemptSk(activity: Activity, target: string, occurredAt: string, attemptId: string): string {
+  return `ATTEMPT#${activity}#${target}#${occurredAt}#${attemptId}`;
 }

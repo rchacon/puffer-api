@@ -50,7 +50,7 @@ export interface Attempt {
   id: string;
   childId: string;
   activity: Activity;
-  targetId: string;
+  target: string;
   challengeType: ChallengeType;
   correct: boolean;
   occurredAt: string;
@@ -62,7 +62,7 @@ export interface RecordAttemptInput {
   attemptId: string;
   childId: string;
   activity: Activity;
-  targetId: string;
+  target: string;
   challengeType: ChallengeType;
   selectedAnswer: string;
   presentedOptions?: string[] | null;
@@ -78,7 +78,7 @@ export interface AttemptItem {
   id: string;
   childId: string;
   activity: Activity;
-  targetId: string;
+  target: string;
   challengeType: ChallengeType;
   selectedAnswer: string;
   presentedOptions?: string[];

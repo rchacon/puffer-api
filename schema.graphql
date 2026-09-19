@@ -27,7 +27,7 @@ type Attempt {
   id: ID!
   childId: ID!
   activity: Activity!
-  targetId: ID!
+  target: String!
   challengeType: ChallengeType!
   correct: Boolean!
   occurredAt: AWSDateTime!
@@ -49,7 +49,7 @@ input RecordAttemptInput {
   attemptId: ID!
   childId: ID!
   activity: Activity!
-  targetId: ID!
+  target: String!
   challengeType: ChallengeType!
   selectedAnswer: String!
   presentedOptions: [String!]

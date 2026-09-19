@@ -11,7 +11,7 @@ export function toAttempt(item: AttemptItem): Attempt {
     id: item.id,
     childId: item.childId,
     activity: item.activity,
-    targetId: item.targetId,
+    target: item.target,
     challengeType: item.challengeType,
     correct: item.correct,
     occurredAt: item.occurredAt,

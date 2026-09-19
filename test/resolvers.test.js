@@ -120,7 +120,7 @@ describe('recordAttempt (pipeline)', () => {
       attemptId: randomUUID(),
       childId,
       activity: 'SIGHT_WORD',
-      targetId: 'whale',
+      target: 'whale',
       challengeType: 'SPELL',
       selectedAnswer: 'whale',
       occurredAt: new Date().toISOString(),
@@ -148,7 +148,7 @@ describe('recordAttempt (pipeline)', () => {
     const child = await newChild(parentSub);
 
     const right = await record(parentSub, attemptInput(child.id, { selectedAnswer: '  Whale ' }));
-    expect(right).toMatchObject({ childId: child.id, targetId: 'whale', challengeType: 'SPELL', correct: true });
+    expect(right).toMatchObject({ childId: child.id, target: 'whale', challengeType: 'SPELL', correct: true });
 
     const wrong = await record(
       parentSub,
@@ -217,7 +217,7 @@ describe('recordAttempt (pipeline)', () => {
       'one of presentedOptions',
     ],
     ['spell with options', { presentedOptions: ['whale', 'otter'] }, 'not allowed'],
-    ['target containing #', { targetId: 'wha#le' }, 'targetId'],
+    ['target containing #', { target: 'wha#le' }, 'target'],
     ['short attemptId', { attemptId: 'abc' }, 'attemptId'],
     ['occurredAt in the future', { occurredAt: new Date(Date.now() + 3_600_000).toISOString() }, 'window'],
     ['occurredAt too old', { occurredAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }, 'window'],

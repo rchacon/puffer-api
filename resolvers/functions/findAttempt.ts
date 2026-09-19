@@ -22,20 +22,20 @@ function invalid(message: string): never {
 // attempt with the same key so recordAttempt can return it instead of writing
 // a duplicate.
 export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptStash>>): DynamoDBGetItemRequest {
-  const { attemptId, activity, targetId, challengeType, selectedAnswer, presentedOptions, occurredAt } = ctx.args.input;
+  const { attemptId, activity, target, challengeType, selectedAnswer, presentedOptions, occurredAt } = ctx.args.input;
 
   // '#' delimits the attempt sort key's segments, so it can't appear in them.
   if (attemptId.length < 8 || attemptId.length > MAX_TEXT_LENGTH || attemptId.includes('#')) {
     invalid(`attemptId must be 8-${MAX_TEXT_LENGTH} characters and not contain '#'`);
   }
-  if (targetId.length < 1 || targetId.length > MAX_TEXT_LENGTH || targetId.includes('#')) {
-    invalid(`targetId must be 1-${MAX_TEXT_LENGTH} characters and not contain '#'`);
+  if (target.length < 1 || target.length > MAX_TEXT_LENGTH || target.includes('#')) {
+    invalid(`target must be 1-${MAX_TEXT_LENGTH} characters and not contain '#'`);
   }
   if (selectedAnswer.length > MAX_TEXT_LENGTH) {
     invalid(`selectedAnswer must be at most ${MAX_TEXT_LENGTH} characters`);
   }
 
-  const target = normalizeAnswer(targetId);
+  const normalizedTarget = normalizeAnswer(target);
   const answer = normalizeAnswer(selectedAnswer);
   if (challengeType === 'CHOOSE_FROM_BANK') {
     if (!presentedOptions || presentedOptions.length < 2 || presentedOptions.length > MAX_OPTIONS) {
@@ -45,7 +45,7 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
     if (presentedOptions.some((o) => o.length > MAX_TEXT_LENGTH)) {
       invalid(`each presented option must be at most ${MAX_TEXT_LENGTH} characters`);
     }
-    if (!options.includes(target)) {
+    if (!options.includes(normalizedTarget)) {
       invalid('presentedOptions must include the target');
     }
     if (!options.includes(answer)) {
@@ -63,8 +63,8 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
   // Canonical UTC form, so equivalent inputs ("...+00:00" vs "...Z") share a key.
   const canonicalOccurredAt = util.time.epochMilliSecondsToISO8601(occurredAtMs);
 
-  const sk = attemptSk(activity, targetId, canonicalOccurredAt, attemptId);
-  ctx.stash.attempt = { sk, occurredAt: canonicalOccurredAt, correct: answer === target };
+  const sk = attemptSk(activity, target, canonicalOccurredAt, attemptId);
+  ctx.stash.attempt = { sk, occurredAt: canonicalOccurredAt, correct: answer === normalizedTarget };
 
   return {
     operation: 'GetItem',

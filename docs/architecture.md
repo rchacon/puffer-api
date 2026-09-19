@@ -18,20 +18,20 @@ follow-up (see below).
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<targetId>#<occurredAt>#<attemptId>` | Immutable. `activity`, `targetId`, `challengeType`, `selectedAnswer`, `presentedOptions` (choose types only), `correct`, `occurredAt`, `receivedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `selectedAnswer`, `presentedOptions` (choose types only), `correct`, `occurredAt`, `receivedAt` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
-comparing `selectedAnswer` to `targetId` (case/whitespace-insensitive). Status
+comparing `selectedAnswer` to `target` (case/whitespace-insensitive). Status
 (`IN_PROGRESS`/`NEEDS_SUPPORT`/`MASTERED`) and attempt counts will be *derived* from
 this history, so the rule can change later without losing the evidence behind any status.
 Every attempt is kept, including the options presented, because the "close decoy"
 algorithm may change.
 
-- `activity` is `SIGHT_WORD` today; `targetId` is the thing practiced (the word itself
+- `activity` is `SIGHT_WORD` today; `target` is the thing practiced (the word itself
   for sight words). `ChallengeType` is `CHOOSE_FROM_BANK` (recognition) or `SPELL`
   (hard mode); more values can be added without breaking clients.
-- The SK puts `<activity>#<targetId>` first so one target's full history (what the
+- The SK puts `<activity>#<target>` first so one target's full history (what the
   mastery rule needs) is a single `begins_with` `Query`. `occurredAt` is the client's
   time (canonical UTC ISO-8601, so it sorts chronologically) and `receivedAt` is the
   server's; `occurredAt` is rejected if more than 5 minutes in the future or 30 days
@@ -43,8 +43,8 @@ algorithm may change.
   itself is conditional (`attribute_not_exists(PK)`) so a concurrent duplicate can't
   overwrite the stored attempt. `occurredAt` is rejected rather than clamped so the
   same request always yields the same key.
-- `targetId` and `attemptId` can't contain `#` (the SK delimiter).
-- **Trust model:** the client reports the `targetId`, so this blocks client-asserted
+- `target` and `attemptId` can't contain `#` (the SK delimiter).
+- **Trust model:** the client reports the `target`, so this blocks client-asserted
   mastery and client bugs, not a caller who knows the answer. Making correctness
   tamper-resistant would need a server-issued challenge flow (`startChallenge` stores
   the target and options; `submitAnswer` judges against them, with a server-assigned

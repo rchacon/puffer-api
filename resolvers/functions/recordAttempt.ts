@@ -10,7 +10,7 @@ type Args = { input: RecordAttemptInput };
 export function request(
   ctx: CognitoContext<Args, unknown, { result: AttemptItem | null }, AttemptStash>
 ): DynamoDBPutItemRequest {
-  const { attemptId, childId, activity, targetId, challengeType, selectedAnswer, presentedOptions } = ctx.args.input;
+  const { attemptId, childId, activity, target, challengeType, selectedAnswer, presentedOptions } = ctx.args.input;
 
   // Retry of an attempt we already recorded: hand back the stored one, don't
   // write a second. The same attemptId with different contents is a client bug.
@@ -27,7 +27,7 @@ export function request(
     id: attemptId,
     childId,
     activity,
-    targetId,
+    target,
     challengeType,
     selectedAnswer,
     correct,
