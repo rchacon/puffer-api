@@ -62,6 +62,12 @@ jobs:
       - name: Generate AppSync CloudFormation template
         run: npm run build:appsync-template
 
+      - name: Install cfn-lint
+        run: pipx install cfn-lint
+
+      - name: Validate generated CloudFormation template
+        run: cfn-lint build/appsync-template.json
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.GRAPHQL_DEPLOY_ROLE_ARN }}

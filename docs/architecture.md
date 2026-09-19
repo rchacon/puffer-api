@@ -141,7 +141,11 @@ IaC tool.
    resolver needs no template-generation-code change) and one
    `AWS::AppSync::FunctionConfiguration` per pipeline function file. It takes
    `ApiId`/`DataSourceName` as plain template parameters — it never creates the
-   AppSync API or data source itself, those are Terraform's.
+   AppSync API or data source itself, those are Terraform's. Being hand-built
+   (plain object literals, no schema checking), a typo'd or missing property
+   would otherwise only surface as a deploy-time AWS API error — `cfn-lint`
+   validates the generated template against AWS's actual published resource
+   specs before anything touches AWS, catching that class of mistake for free.
 5. `aws cloudformation deploy` applies that template, authenticated via a
    separate OIDC-assumed role (`vars.GRAPHQL_DEPLOY_ROLE_ARN`).
 
