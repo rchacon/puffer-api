@@ -153,7 +153,7 @@ describe('recordAttempt (pipeline)', () => {
     const wrong = await record(
       parentSub,
       attemptInput(child.id, {
-        challengeType: 'CHOOSE_FROM_BANK',
+        challengeType: 'MULTIPLE_CHOICE',
         selectedAnswer: 'otter',
         presentedOptions: ['whale', 'otter', 'seal'],
       })
@@ -205,15 +205,15 @@ describe('recordAttempt (pipeline)', () => {
   });
 
   it.each([
-    ['choose without options', { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'whale' }, 'presentedOptions'],
+    ['multiple choice without options', { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'whale' }, 'presentedOptions'],
     [
       'options missing the target',
-      { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'otter', presentedOptions: ['otter', 'seal'] },
+      { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'otter', presentedOptions: ['otter', 'seal'] },
       'include the target',
     ],
     [
       'answer not among the options',
-      { challengeType: 'CHOOSE_FROM_BANK', selectedAnswer: 'crab', presentedOptions: ['whale', 'otter'] },
+      { challengeType: 'MULTIPLE_CHOICE', selectedAnswer: 'crab', presentedOptions: ['whale', 'otter'] },
       'one of presentedOptions',
     ],
     ['spell with options', { presentedOptions: ['whale', 'otter'] }, 'not allowed'],

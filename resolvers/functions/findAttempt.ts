@@ -37,9 +37,9 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
 
   const normalizedTarget = normalizeAnswer(target);
   const answer = normalizeAnswer(selectedAnswer);
-  if (challengeType === 'CHOOSE_FROM_BANK') {
+  if (challengeType === 'MULTIPLE_CHOICE') {
     if (!presentedOptions || presentedOptions.length < 2 || presentedOptions.length > MAX_OPTIONS) {
-      invalid(`presentedOptions must have 2-${MAX_OPTIONS} entries for CHOOSE_FROM_BANK`);
+      invalid(`presentedOptions must have 2-${MAX_OPTIONS} entries for MULTIPLE_CHOICE`);
     }
     const options = presentedOptions.map(normalizeAnswer);
     if (presentedOptions.some((o) => o.length > MAX_TEXT_LENGTH)) {

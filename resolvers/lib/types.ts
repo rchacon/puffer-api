@@ -43,7 +43,7 @@ export interface Child {
 export type Activity = 'SIGHT_WORD';
 
 // Mirrors the ChallengeType enum in schema.graphql.
-export type ChallengeType = 'CHOOSE_FROM_BANK' | 'SPELL';
+export type ChallengeType = 'MULTIPLE_CHOICE' | 'SPELL';
 
 // Mirrors the Attempt type in schema.graphql.
 export interface Attempt {

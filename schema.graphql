@@ -19,7 +19,7 @@ enum Activity {
 }
 
 enum ChallengeType {
-  CHOOSE_FROM_BANK
+  MULTIPLE_CHOICE
   SPELL
 }
 

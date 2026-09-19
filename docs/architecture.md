@@ -18,7 +18,7 @@ follow-up (see below).
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `selectedAnswer`, `presentedOptions` (choose types only), `correct`, `occurredAt`, `receivedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `selectedAnswer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
@@ -29,7 +29,7 @@ Every attempt is kept, including the options presented, because the "close decoy
 algorithm may change.
 
 - `activity` is `SIGHT_WORD` today; `target` is the thing practiced (the word itself
-  for sight words). `ChallengeType` is `CHOOSE_FROM_BANK` (recognition) or `SPELL`
+  for sight words). `ChallengeType` is `MULTIPLE_CHOICE` (recognition) or `SPELL`
   (hard mode); more values can be added without breaking clients.
 - The SK puts `<activity>#<target>` first so one target's full history (what the
   mastery rule needs) is a single `begins_with` `Query`. `occurredAt` is the client's
