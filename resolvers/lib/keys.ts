@@ -1,3 +1,5 @@
+import type { WordStatus } from './types.js';
+
 // Partition key shared by a parent's own profile item and all of their child
 // items, so "parent + all children" is one Query on this PK (see myChildren).
 export function parentPk(sub: string): string {
@@ -31,6 +33,6 @@ export function wordSk(word: string): string {
 // GSI1SK value for a word-progress item, sorted by status then word. Lets
 // queryChildWordProgress filter to one status via begins_with(GSI1SK, ...)
 // instead of scanning and filtering all of a child's words.
-export function statusIndexKey(status: string, word: string): string {
+export function statusIndexKey(status: WordStatus, word: string): string {
   return `STATUS#${status}#WORD#${word}`;
 }
