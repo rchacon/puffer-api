@@ -149,14 +149,17 @@ IaC tool.
 5. `aws cloudformation deploy` applies that template, authenticated via a
    separate OIDC-assumed role (`vars.GRAPHQL_DEPLOY_ROLE_ARN`).
 
-Not yet handled: pipeline *resolvers* (as opposed to pipeline *functions*) — this
-repo doesn't have any yet, since word-progress (which needs
-`childWordProgress`/`recordWordAttempt` as pipeline resolvers) is still on a
-separate, unmerged branch. Those need `Kind: PIPELINE` +
-`PipelineConfig.Functions` on the generated `AWS::AppSync::Resolver` resource,
-referencing the already-generated function resources' `FunctionId`s —
-`scripts/generate-appsync-template.mjs` will need that case added when that
-branch lands.
+Pipeline *resolvers* (as opposed to pipeline *functions*) — `childWordProgress`/
+`recordWordAttempt` — are `Kind: PIPELINE` in the generated template, not `UNIT`.
+`generate-appsync-template.mjs` tells the two apart by dynamically importing each
+built resolver module and checking for a `pipelineFunctions` export (e.g.
+`resolvers/Mutation.recordWordAttempt.ts` exports `pipelineFunctions =
+['verifyChildOwnership', 'recordWordAttempt']`) — present means `PIPELINE`, with
+`PipelineConfig.Functions` built from `Fn::GetAtt`ing each named function's
+`FunctionId` (no explicit `DependsOn` on those functions needed; the `Fn::GetAtt`
+references already create that dependency implicitly — `cfn-lint` caught this
+exact redundancy when it was first written with an explicit `DependsOn` too).
+Absent means `UNIT`, wired directly to the data source as before.
 
 ### What Terraform needs to expose
 

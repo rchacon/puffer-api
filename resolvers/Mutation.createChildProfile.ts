@@ -5,7 +5,7 @@ import type { Child, CognitoContext } from './lib/types.js';
 type Args = { input: { name: string; avatar?: string | null; birthday: string } };
 type Stash = { childId: string; createdAt: string };
 
-export function request(ctx: CognitoContext<Args, Partial<Stash>>): DynamoDBPutItemRequest {
+export function request(ctx: CognitoContext<Args, any, any, Partial<Stash>>): DynamoDBPutItemRequest {
   const childId = util.autoId();
   const createdAt = util.time.nowISO8601();
   ctx.stash.childId = childId;
@@ -26,7 +26,7 @@ export function request(ctx: CognitoContext<Args, Partial<Stash>>): DynamoDBPutI
   };
 }
 
-export function response(ctx: CognitoContext<Args, Stash>): Child {
+export function response(ctx: CognitoContext<Args, any, any, Stash>): Child {
   if (ctx.error) {
     return util.error(ctx.error.message, ctx.error.type);
   }
