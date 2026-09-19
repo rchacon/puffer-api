@@ -1,9 +1,16 @@
 import type { AppSyncIdentityCognito, Context } from '@aws-appsync/utils';
 
+// "Empty object" -- Record<string, never> is a genuinely empty object type
+// (any real property would need a value of type `never`, which no value can
+// ever be); the plain `{}` most people reach for instead actually means "any
+// non-null value" in TS's structural typing, not "no properties." Aliased
+// here so it doesn't need explaining at every call site.
+export type Empty = Record<string, never>;
+
 // This API is Cognito User Pool-authorized only, so narrow the real (much
 // wider) Context['identity'] union down to the one shape we actually get.
 export type CognitoContext<
-  TArgs = Record<string, never>,
+  TArgs = Empty,
   TStash extends Record<string, any> = Record<string, any>,
   TResult = any,
   TPrev extends Record<string, any> | undefined = any,

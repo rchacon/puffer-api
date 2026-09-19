@@ -1,6 +1,6 @@
 import { util, type DynamoDBQueryRequest } from '@aws-appsync/utils';
 import { parentPk } from './lib/keys.js';
-import type { Child, CognitoContext } from './lib/types.js';
+import type { Child, CognitoContext, Empty } from './lib/types.js';
 
 type ChildItem = { PK: string; SK: string; name: string; avatar: string | null; birthday: string; createdAt: string };
 type QueryResult = { items: ChildItem[] };
@@ -18,7 +18,7 @@ export function request(ctx: CognitoContext): DynamoDBQueryRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Record<string, never>, Record<string, any>, QueryResult>): Child[] {
+export function response(ctx: CognitoContext<Empty, Record<string, any>, QueryResult>): Child[] {
   if (ctx.error) {
     return util.error(ctx.error.message, ctx.error.type);
   }

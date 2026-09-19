@@ -1,6 +1,6 @@
 import { util, type DynamoDBGetItemRequest } from '@aws-appsync/utils';
 import { parentPk, profileSk } from './lib/keys.js';
-import type { CognitoContext, Parent } from './lib/types.js';
+import type { CognitoContext, Empty, Parent } from './lib/types.js';
 
 type ParentItem = { PK: string; SK: string; email: string; name: string | null; createdAt: string };
 
@@ -14,7 +14,7 @@ export function request(ctx: CognitoContext): DynamoDBGetItemRequest {
   };
 }
 
-export function response(ctx: CognitoContext<Record<string, never>, Record<string, any>, ParentItem | null>): Parent | null {
+export function response(ctx: CognitoContext<Empty, Record<string, any>, ParentItem | null>): Parent | null {
   if (!ctx.result) {
     return null;
   }
