@@ -15,6 +15,9 @@ export function request(ctx: CognitoContext<Empty, unknown, any, Stash>): Dynamo
 }
 
 export function response(ctx: CognitoContext<Empty, Record<string, unknown> | null, any, Stash>) {
+  if (ctx.error) {
+    return util.error(ctx.error.message, ctx.error.type);
+  }
   if (!ctx.result) {
     util.error(`Child ${ctx.stash.childId} not found for this parent`, 'NotFound');
   }

@@ -75,5 +75,10 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
 }
 
 export function response(ctx: CognitoContext<Args, AttemptItem | null>): AttemptItem | null {
+  // A failed read must not look like "no existing attempt", or the duplicate
+  // check is silently skipped.
+  if (ctx.error) {
+    return util.error(ctx.error.message, ctx.error.type);
+  }
   return ctx.result;
 }

@@ -50,5 +50,8 @@ export function request(
 }
 
 export function response(ctx: CognitoContext<Args, AttemptItem>): Attempt {
+  if (ctx.error) {
+    return util.error(ctx.error.message, ctx.error.type);
+  }
   return toAttempt(ctx.result);
 }

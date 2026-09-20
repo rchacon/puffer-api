@@ -229,6 +229,20 @@ describe('recordAttempt (pipeline)', () => {
     expect(await storedAttempts(child.id)).toHaveLength(0);
   });
 
+  it.each([
+    ['verifyChildOwnership', verifyChildOwnership],
+    ['prepareAttempt', prepareAttempt],
+    ['recordAttempt', recordAttempt],
+  ])('%s.response surfaces a failed data source call instead of masking it', (_name, fn) => {
+    const ctx = {
+      ...ctxFor(randomUUID(), { input: attemptInput('child-1') }),
+      stash: { childId: 'child-1' },
+      result: null,
+      error: { message: 'ProvisionedThroughputExceededException', type: 'DynamoDB:ProvisionedThroughputExceededException' },
+    };
+    expect(() => fn.response(ctx)).toThrow('ProvisionedThroughputExceededException');
+  });
+
   it('rejects recording an attempt against a child that is not the caller\'s', async () => {
     const owner = randomUUID();
     const attacker = randomUUID();
