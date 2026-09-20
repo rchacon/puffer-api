@@ -21,7 +21,11 @@ async function executeDynamoDbRequest(op) {
   switch (op.operation) {
     case 'GetItem': {
       const { Item } = await client.send(
-        new GetItemCommand({ TableName: TABLE_NAME, Key: op.key })
+        new GetItemCommand({
+          TableName: TABLE_NAME,
+          Key: op.key,
+          ConsistentRead: op.consistentRead,
+        })
       );
       return Item ? unmarshall(Item) : null;
     }
@@ -78,15 +82,23 @@ export async function runUnitResolver(resolverModule, ctx) {
 
 // Runs an ordered list of resolver function modules as an AppSync pipeline resolver:
 // each function's response() output becomes ctx.prev.result for the next function.
-export async function runPipelineResolver(functionModules, ctx) {
+// Pass the resolver module itself to also run its request() (before the functions,
+// e.g. to seed the stash) and its response() (which shapes the final result).
+export async function runPipelineResolver(functionModules, ctx, resolverModule) {
   ctx.stash ??= {};
   ctx.prev = { result: null };
+  resolverModule?.request(ctx);
   for (const fn of functionModules) {
-    const op = fn.request(ctx);
-    ctx.result = await executeDynamoDbRequest(op);
-    ctx.prev = { result: fn.response(ctx) };
+    try {
+      const op = fn.request(ctx);
+      ctx.result = await executeDynamoDbRequest(op);
+      ctx.prev = { result: fn.response(ctx) };
+    } catch (err) {
+      if (!err.earlyReturn) throw err;
+      ctx.prev = { result: err.value };
+    }
   }
-  return ctx.prev.result;
+  return resolverModule ? resolverModule.response(ctx) : ctx.prev.result;
 }
 
 export { TABLE_NAME, client as dynamoClient, marshall, unmarshall };

@@ -1,7 +1,7 @@
 # Architecture
 
 GraphQL API (AWS AppSync) for Puffer Panic: parents sign in via Cognito, create
-profiles for their kids, and each kid's per-word learning progress is tracked so a
+profiles for their kids, and each kid's practice attempts are recorded so a
 (not yet built) parent portal can show which words a kid needs help with.
 
 Terraform to provision the AWS resources described here lives in a separate repo,
@@ -10,22 +10,67 @@ the GraphQL schema, resolvers, and application Lambdas only.
 
 ## DynamoDB — single table
 
-One table, generic `PK`/`SK`, plus `GSI1` for the portal's status-filtered query.
+One table, generic `PK`/`SK`, no secondary indexes yet. The portal's status-filtered
+progress query will need one (a `GSI1`), added together with the status-derivation
+follow-up (see below).
 
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Word progress | `CHILD#<childId>` | `WORD#<word>` | `status` (`IN_PROGRESS`/`NEEDS_SUPPORT`/`MASTERED`), `attempts`, `lastPracticedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
 
-`GSI1PK = CHILD#<childId>`, `GSI1SK = STATUS#<status>#WORD#<word>` — only word-progress
-items carry these attributes (a sparse index), letting the portal query "this kid's
-words needing support" directly instead of scanning and filtering.
+**Attempts are the source of truth.** Nothing about a child's progress is supplied by
+the caller: `recordAttempt` stores what happened, and the server decides `correct` by
+comparing `answer` to `target` (case/whitespace-insensitive). Status
+(`IN_PROGRESS`/`NEEDS_SUPPORT`/`MASTERED`) and attempt counts will be *derived* from
+this history, so the rule can change later without losing the evidence behind any status.
+Every attempt is kept, including the options presented, because the "close decoy"
+algorithm may change.
 
-Why single-table with one item per word, instead of an embedded map on the child
-item: a child's vocabulary can grow past what comfortably fits (and is efficiently
-updatable) in one 400KB item, and the portal's core query — "words needing support"
-— is a first-class access pattern that a GSI serves directly.
+- `activity` is `SIGHT_WORD` today; `target` is the thing practiced (the word itself
+  for sight words). `ChallengeType` is `MULTIPLE_CHOICE` (recognition) or `SPELL`
+  (hard mode); more values can be added without breaking clients.
+- The SK puts `<activity>#<target>` first so one target's full history (what the
+  mastery rule needs) is a single `begins_with` `Query`. `occurredAt` is the client's
+  time (canonical UTC ISO-8601, so it sorts chronologically) and `receivedAt` is the
+  server's; `occurredAt` is rejected if more than 5 minutes in the future or 30 days
+  old.
+- **Idempotent retries:** the client supplies `attemptId` and `occurredAt`, so a retry
+  maps to the same key. `prepareAttempt` reads that key first; if the attempt exists,
+  `recordAttempt` returns it (`runtime.earlyReturn`) instead of writing, or raises
+  `Conflict` if the same `attemptId` came back with a different answer, challenge type
+  or `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`)
+  so a concurrent duplicate can't overwrite the stored attempt. `occurredAt` is
+  rejected rather than clamped so the same request always yields the same key.
+  - **Client contract:** because `occurredAt` is part of the key, a retry must resend
+    the identical payload. Generate `attemptId` and `occurredAt` once, when the child
+    answers, and store them with the attempt until it is recorded. A retry with the
+    same `attemptId` but a different `occurredAt` looks like a new attempt and is
+    stored as a duplicate. (Documented on `RecordAttemptInput` in the schema.)
+  - **Deferred:** making `attemptId` the sole idempotency key (`ATTEMPT#<attemptId>`,
+    with per-target history read from a `GSI1` instead of the sort key) would remove
+    that caveat, and the follow-up PR needs a `GSI1` for the status query anyway.
+    Nothing is deployed, so changing the key format then needs no migration.
+- `target` is trimmed and lowercased before it is keyed, stored or returned (the same form
+  `correct` is judged on), so `Cat`, `cat` and ` cat ` share one history; it must be non-empty
+  after trimming. `target` and `attemptId` can't contain `#` (the SK delimiter).
+- **Trust model:** the client reports the `target`, so this blocks client-asserted
+  mastery and client bugs, not a caller who knows the answer. Making correctness
+  tamper-resistant would need a server-issued challenge flow (`startChallenge` stores
+  the target and options; `submitAnswer` judges against them, with a server-assigned
+  timestamp) — costing a round trip per question and offline play. Not planned for now.
+
+**Deferred: derived progress.** A follow-up PR will derive status and attempt counts
+from attempts into a rebuildable per-target summary item (with the `GSI1` keys it
+introduces, and a `policyVersion` recording which rule produced it). Proposed mastery rule: three correct
+`SPELL` attempts on three different days, the third at least a week after the first,
+and the two most recent `SPELL` attempts correct; recognition attempts only inform
+practice recommendations. Still to define: the `NEEDS_SUPPORT` rule and whether a
+"day" is UTC or per-child time zone. Writing the summary atomically with the attempt
+would need `TransactWriteItems`, which requires the table name inside resolver code —
+resolvers only receive `ApiId`/`DataSourceName` today, so that follow-up has to decide
+how to supply it (a template parameter, or a stream-driven projection instead).
 
 Deferred, not built for v1: rollup counters (e.g. `totalMastered`) on the child item
 kept in sync via DynamoDB Streams, useful for a portal dashboard but unnecessary
@@ -55,19 +100,21 @@ preserve single-password SSO across game and portal.
 
 Cognito User Pool authorizer on the API (`schema.graphql`). Every resolver scopes by
 the caller's Cognito `sub` from the identity context, so a parent can only read/write
-their own parent/child/word items:
+their own parent/child items and their children's attempts:
 
 - `Query.myProfile`, `Query.myChildren` — direct DynamoDB resolvers, scoped by using
   the caller's own `sub` as the partition key.
 - `Mutation.createChildProfile` — direct resolver, writes under the caller's own
   parent partition.
-- `Query.childWordProgress`, `Mutation.recordWordAttempt` — **pipeline** resolvers:
-  `functions/verifyChildOwnership.js` runs first and raises a `NotFound` error unless
-  the given `childId` belongs to the caller, then `functions/queryChildWordProgress.js`
-  or `functions/recordWordAttempt.js` runs the actual operation. A single-step
-  resolver can't check-then-act in one round trip, so ownership verification needs
-  the extra pipeline function — otherwise a parent could pass another family's
-  `childId` and read or write their word-progress data.
+- `Mutation.recordAttempt` — **pipeline** resolver: `functions/verifyChildOwnership.js`
+  runs first and raises a `NotFound` error unless the given `childId` belongs to the
+  caller, then `functions/prepareAttempt.js` validates the input and looks for an existing
+  attempt with the same key, then `functions/recordAttempt.js` writes it (or returns the
+  existing one). A single-step resolver can't check-then-act in one round trip, so
+  ownership verification needs the extra pipeline function — otherwise a parent could
+  pass another family's `childId` and write to their child's history. The resolver's own
+  request handler copies `input.childId` into `ctx.stash.childId`, which
+  `verifyChildOwnership` reads, since it can't know how each resolver nests `childId`.
 
 Resolvers are TypeScript, using `import { util } from '@aws-appsync/utils'` — the
 same pattern AWS's own docs and CDK bundling use, and typed against that package's
@@ -149,14 +196,17 @@ IaC tool.
 5. `aws cloudformation deploy` applies that template, authenticated via a
    separate OIDC-assumed role (`vars.GRAPHQL_DEPLOY_ROLE_ARN`).
 
-Not yet handled: pipeline *resolvers* (as opposed to pipeline *functions*) — this
-repo doesn't have any yet, since word-progress (which needs
-`childWordProgress`/`recordWordAttempt` as pipeline resolvers) is still on a
-separate, unmerged branch. Those need `Kind: PIPELINE` +
-`PipelineConfig.Functions` on the generated `AWS::AppSync::Resolver` resource,
-referencing the already-generated function resources' `FunctionId`s —
-`scripts/generate-appsync-template.mjs` will need that case added when that
-branch lands.
+Pipeline *resolvers* (as opposed to pipeline *functions*) — `recordAttempt` — are
+`Kind: PIPELINE` in the generated template, not `UNIT`.
+`generate-appsync-template.mjs` tells the two apart by dynamically importing each
+built resolver module and checking for a `pipelineFunctions` export (e.g.
+`resolvers/Mutation.recordAttempt.ts` exports `pipelineFunctions =
+['verifyChildOwnership', 'prepareAttempt', 'recordAttempt']`) — present means `PIPELINE`, with
+`PipelineConfig.Functions` built from `Fn::GetAtt`ing each named function's
+`FunctionId` (no explicit `DependsOn` on those functions needed; the `Fn::GetAtt`
+references already create that dependency implicitly — `cfn-lint` caught this
+exact redundancy when it was first written with an explicit `DependsOn` too).
+Absent means `UNIT`, wired directly to the data source as before.
 
 ### What Terraform needs to expose
 
@@ -173,7 +223,7 @@ AppSync API ID, and the data source name.
 ## Local development & testing
 
 - **DynamoDB**: `docker compose up` runs `amazon/dynamodb-local`, then
-  `npm run create-table` creates the table + GSI1 against it.
+  `npm run create-table` creates the table against it.
 - **Resolver/schema logic**: `npm test` runs `test/resolvers.test.js` and
   `lambdas/postConfirmation/index.test.js` against the real Dockerized DynamoDB via
   `test/dynamoResolverHarness.js`, which executes each resolver's `request()` output

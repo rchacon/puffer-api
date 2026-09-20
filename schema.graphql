@@ -14,6 +14,26 @@ type Child {
   createdAt: AWSDateTime!
 }
 
+enum Activity {
+  SIGHT_WORD
+}
+
+enum ChallengeType {
+  MULTIPLE_CHOICE
+  SPELL
+}
+
+type Attempt {
+  id: ID!
+  childId: ID!
+  activity: Activity!
+  target: String!
+  challengeType: ChallengeType!
+  correct: Boolean!
+  occurredAt: AWSDateTime!
+  receivedAt: AWSDateTime!
+}
+
 type Query {
   myProfile: Parent
   myChildren: [Child!]!
@@ -25,8 +45,27 @@ input CreateChildProfileInput {
   birthday: AWSDate!
 }
 
+"""
+A retry of the same attempt must resend an identical payload. `attemptId` and
+`occurredAt` together identify the attempt, so generate both once, when the child
+answers, and store them with the attempt until it is recorded.
+"""
+input RecordAttemptInput {
+  """Unique per attempt (8-64 characters, no '#'), e.g. a UUID or ULID."""
+  attemptId: ID!
+  childId: ID!
+  activity: Activity!
+  target: String!
+  challengeType: ChallengeType!
+  answer: String!
+  presentedOptions: [String!]
+  """When the child answered. Must be identical on every retry of this attempt."""
+  occurredAt: AWSDateTime!
+}
+
 type Mutation {
   createChildProfile(input: CreateChildProfileInput!): Child!
+  recordAttempt(input: RecordAttemptInput!): Attempt!
 }
 
 schema {

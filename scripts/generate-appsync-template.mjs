@@ -13,7 +13,8 @@
 // hand-rolled YAML block scalars have real indentation/escaping edge cases.
 // CloudFormation accepts JSON templates identically to YAML ones.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { join, basename, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const BUILD_DIR = 'build';
 const RUNTIME = { Name: 'APPSYNC_JS', RuntimeVersion: '1.0.0' };
@@ -40,33 +41,20 @@ function pascalCase(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-const resolversDir = join(BUILD_DIR, 'resolvers');
-for (const file of readdirSync(resolversDir).filter((f) => f.endsWith('.js'))) {
-  const [typeName, fieldName] = basename(file, '.js').split('.');
-  const logicalId = `Resolver${pascalCase(typeName)}${pascalCase(fieldName)}`;
-  template.Resources[logicalId] = {
-    Type: 'AWS::AppSync::Resolver',
-    DependsOn: 'GraphQLSchema',
-    Properties: {
-      ApiId: { Ref: 'ApiId' },
-      TypeName: typeName,
-      FieldName: fieldName,
-      DataSourceName: { Ref: 'DataSourceName' },
-      Kind: 'UNIT',
-      Runtime: RUNTIME,
-      Code: readFileSync(join(resolversDir, file), 'utf8'),
-    },
-  };
-  console.log(`Added resolver ${typeName}.${fieldName} (${logicalId})`);
+function functionLogicalId(name) {
+  return `Function${pascalCase(name)}`;
 }
 
+// Functions first, so resolvers below can DependsOn / Fn::GetAtt them.
+const resolversDir = join(BUILD_DIR, 'resolvers');
 const functionsDir = join(resolversDir, 'functions');
 if (existsSync(functionsDir)) {
   for (const file of readdirSync(functionsDir).filter((f) => f.endsWith('.js'))) {
     const name = basename(file, '.js');
-    const logicalId = `Function${pascalCase(name)}`;
+    const logicalId = functionLogicalId(name);
     template.Resources[logicalId] = {
       Type: 'AWS::AppSync::FunctionConfiguration',
+      DependsOn: 'GraphQLSchema',
       Properties: {
         ApiId: { Ref: 'ApiId' },
         Name: name,
@@ -77,6 +65,56 @@ if (existsSync(functionsDir)) {
       },
     };
     console.log(`Added pipeline function ${name} (${logicalId})`);
+  }
+}
+
+for (const file of readdirSync(resolversDir).filter((f) => f.endsWith('.js'))) {
+  const [typeName, fieldName] = basename(file, '.js').split('.');
+  const logicalId = `Resolver${pascalCase(typeName)}${pascalCase(fieldName)}`;
+  const filePath = join(resolversDir, file);
+  const code = readFileSync(filePath, 'utf8');
+
+  // A resolver whose module exports `pipelineFunctions` is a PIPELINE
+  // resolver (see resolvers/Mutation.recordAttempt.ts for why) -- it
+  // chains functions instead of talking to a data source directly.
+  const mod = await import(pathToFileURL(resolve(filePath)).href);
+  const pipelineFunctions = mod.pipelineFunctions;
+
+  if (pipelineFunctions) {
+    const functionLogicalIds = pipelineFunctions.map(functionLogicalId);
+    template.Resources[logicalId] = {
+      Type: 'AWS::AppSync::Resolver',
+      // Not depending on the functions explicitly: PipelineConfig.Functions'
+      // Fn::GetAtt references already create that dependency implicitly.
+      DependsOn: 'GraphQLSchema',
+      Properties: {
+        ApiId: { Ref: 'ApiId' },
+        TypeName: typeName,
+        FieldName: fieldName,
+        Kind: 'PIPELINE',
+        Runtime: RUNTIME,
+        Code: code,
+        PipelineConfig: {
+          Functions: functionLogicalIds.map((id) => ({ 'Fn::GetAtt': [id, 'FunctionId'] })),
+        },
+      },
+    };
+    console.log(`Added pipeline resolver ${typeName}.${fieldName} (${logicalId}) -> ${pipelineFunctions.join(' -> ')}`);
+  } else {
+    template.Resources[logicalId] = {
+      Type: 'AWS::AppSync::Resolver',
+      DependsOn: 'GraphQLSchema',
+      Properties: {
+        ApiId: { Ref: 'ApiId' },
+        TypeName: typeName,
+        FieldName: fieldName,
+        DataSourceName: { Ref: 'DataSourceName' },
+        Kind: 'UNIT',
+        Runtime: RUNTIME,
+        Code: code,
+      },
+    };
+    console.log(`Added resolver ${typeName}.${fieldName} (${logicalId})`);
   }
 }
 

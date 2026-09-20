@@ -18,6 +18,15 @@ export const util = {
     nowISO8601() {
       return new Date().toISOString();
     },
+    nowEpochMilliSeconds() {
+      return Date.now();
+    },
+    parseISO8601ToEpochMilliSeconds(timestamp) {
+      return Date.parse(timestamp);
+    },
+    epochMilliSecondsToISO8601(milliseconds) {
+      return new Date(milliseconds).toISOString();
+    },
   },
   autoId() {
     return randomUUID();
@@ -25,6 +34,18 @@ export const util = {
   error(message, errorType) {
     const err = new Error(message);
     err.errorType = errorType;
+    throw err;
+  },
+};
+
+// runtime.earlyReturn(obj) in a function's request() skips the data source
+// call and response(), making `obj` that function's result. Modeled here as a
+// tagged throw that the pipeline harness catches (see dynamoResolverHarness.js).
+export const runtime = {
+  earlyReturn(obj) {
+    const err = new Error('runtime.earlyReturn');
+    err.earlyReturn = true;
+    err.value = obj;
     throw err;
   },
 };
