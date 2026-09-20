@@ -14,9 +14,15 @@ export function request(
 
   // Retry of an attempt we already recorded: hand back the stored one, don't
   // write a second. The same attemptId with different contents is a client bug.
+  // (A retry that changes occurredAt maps to a different key and so isn't seen
+  // here; clients must resend it unchanged -- see RecordAttemptInput.)
   const existing = ctx.prev.result;
   if (existing) {
-    if (existing.answer !== answer || existing.challengeType !== challengeType) {
+    if (
+      existing.answer !== answer ||
+      existing.challengeType !== challengeType ||
+      JSON.stringify(existing.presentedOptions ?? null) !== JSON.stringify(presentedOptions ?? null)
+    ) {
       util.error(`attemptId ${attemptId} was already used for a different attempt`, 'Conflict');
     }
     runtime.earlyReturn(toAttempt(existing));

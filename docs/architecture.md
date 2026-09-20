@@ -39,10 +39,19 @@ algorithm may change.
 - **Idempotent retries:** the client supplies `attemptId` and `occurredAt`, so a retry
   maps to the same key. `prepareAttempt` reads that key first; if the attempt exists,
   `recordAttempt` returns it (`runtime.earlyReturn`) instead of writing, or raises
-  `Conflict` if the same `attemptId` came back with a different answer. The write
-  itself is conditional (`attribute_not_exists(PK)`) so a concurrent duplicate can't
-  overwrite the stored attempt. `occurredAt` is rejected rather than clamped so the
-  same request always yields the same key.
+  `Conflict` if the same `attemptId` came back with a different answer, challenge type
+  or `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`)
+  so a concurrent duplicate can't overwrite the stored attempt. `occurredAt` is
+  rejected rather than clamped so the same request always yields the same key.
+  - **Client contract:** because `occurredAt` is part of the key, a retry must resend
+    the identical payload. Generate `attemptId` and `occurredAt` once, when the child
+    answers, and store them with the attempt until it is recorded. A retry with the
+    same `attemptId` but a different `occurredAt` looks like a new attempt and is
+    stored as a duplicate. (Documented on `RecordAttemptInput` in the schema.)
+  - **Deferred:** making `attemptId` the sole idempotency key (`ATTEMPT#<attemptId>`,
+    with per-target history read from a `GSI1` instead of the sort key) would remove
+    that caveat, and the follow-up PR needs a `GSI1` for the status query anyway.
+    Nothing is deployed, so changing the key format then needs no migration.
 - `target` is trimmed and lowercased before it is keyed, stored or returned (the same form
   `correct` is judged on), so `Cat`, `cat` and ` cat ` share one history; it must be non-empty
   after trimming. `target` and `attemptId` can't contain `#` (the SK delimiter).

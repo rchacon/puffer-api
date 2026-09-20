@@ -210,6 +210,24 @@ describe('recordAttempt (pipeline)', () => {
     expect(await storedAttempts(child.id)).toHaveLength(1);
   });
 
+  it('rejects reusing an attemptId with different presented options', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const input = attemptInput(child.id, {
+      challengeType: 'MULTIPLE_CHOICE',
+      answer: 'whale',
+      presentedOptions: ['whale', 'otter'],
+    });
+
+    await record(parentSub, input);
+    await expect(
+      record(parentSub, { ...input, presentedOptions: ['whale', 'seal'] })
+    ).rejects.toThrow('already used');
+    await expect(record(parentSub, { ...input, presentedOptions: ['otter', 'whale'] })).rejects.toThrow('already used');
+    expect(await record(parentSub, input)).toMatchObject({ target: 'whale', correct: true });
+    expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
   it('rejects reusing an attemptId for a different answer', async () => {
     const parentSub = randomUUID();
     const child = await newChild(parentSub);
