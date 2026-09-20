@@ -28,14 +28,17 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
   if (attemptId.length < 8 || attemptId.length > MAX_TEXT_LENGTH || attemptId.includes('#')) {
     invalid(`attemptId must be 8-${MAX_TEXT_LENGTH} characters and not contain '#'`);
   }
-  if (target.length < 1 || target.length > MAX_TEXT_LENGTH || target.includes('#')) {
-    invalid(`target must be 1-${MAX_TEXT_LENGTH} characters and not contain '#'`);
+  // The target is keyed, stored and returned in its canonical form (the same
+  // one `correct` is judged on), so "Cat", "cat" and " cat " are one word with
+  // one history instead of three sort-key prefixes.
+  const normalizedTarget = normalizeText(target);
+  if (normalizedTarget.length < 1 || normalizedTarget.length > MAX_TEXT_LENGTH || normalizedTarget.includes('#')) {
+    invalid(`target must be 1-${MAX_TEXT_LENGTH} characters after trimming and not contain '#'`);
   }
   if (answer.length > MAX_TEXT_LENGTH) {
     invalid(`answer must be at most ${MAX_TEXT_LENGTH} characters`);
   }
 
-  const normalizedTarget = normalizeText(target);
   const normalizedAnswer = normalizeText(answer);
   if (challengeType === 'MULTIPLE_CHOICE') {
     if (!presentedOptions || presentedOptions.length < 2 || presentedOptions.length > MAX_OPTIONS) {
@@ -63,8 +66,13 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
   // Canonical UTC form, so equivalent inputs ("...+00:00" vs "...Z") share a key.
   const canonicalOccurredAt = util.time.epochMilliSecondsToISO8601(occurredAtMs);
 
-  const sk = attemptSk(activity, target, canonicalOccurredAt, attemptId);
-  ctx.stash.attempt = { sk, occurredAt: canonicalOccurredAt, correct: normalizedAnswer === normalizedTarget };
+  const sk = attemptSk(activity, normalizedTarget, canonicalOccurredAt, attemptId);
+  ctx.stash.attempt = {
+    sk,
+    target: normalizedTarget,
+    occurredAt: canonicalOccurredAt,
+    correct: normalizedAnswer === normalizedTarget,
+  };
 
   return {
     operation: 'GetItem',

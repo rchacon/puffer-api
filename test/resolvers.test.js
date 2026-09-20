@@ -170,6 +170,21 @@ describe('recordAttempt (pipeline)', () => {
     });
   });
 
+  it('keys and stores the canonical target so spelling variants share one history', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+
+    const a = await record(parentSub, attemptInput(child.id, { target: 'Cat', answer: 'cat' }));
+    const b = await record(parentSub, attemptInput(child.id, { target: ' cat ', answer: 'CAT' }));
+
+    expect(a).toMatchObject({ target: 'cat', correct: true });
+    expect(b).toMatchObject({ target: 'cat', correct: true });
+    const items = (await storedAttempts(child.id)).map((i) => unmarshall(i));
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.SK.startsWith('ATTEMPT#SIGHT_WORD#cat#'))).toBe(true);
+    expect(items.every((i) => i.target === 'cat')).toBe(true);
+  });
+
   it('is idempotent: retrying the same attempt returns the stored one without a duplicate', async () => {
     const parentSub = randomUUID();
     const child = await newChild(parentSub);
@@ -218,6 +233,7 @@ describe('recordAttempt (pipeline)', () => {
     ],
     ['spell with options', { presentedOptions: ['whale', 'otter'] }, 'not allowed'],
     ['target containing #', { target: 'wha#le' }, 'target'],
+    ['whitespace-only target', { target: '   ', answer: '' }, 'target'],
     ['short attemptId', { attemptId: 'abc' }, 'attemptId'],
     ['occurredAt in the future', { occurredAt: new Date(Date.now() + 3_600_000).toISOString() }, 'window'],
     ['occurredAt too old', { occurredAt: new Date(Date.now() - 40 * 86_400_000).toISOString() }, 'window'],

@@ -43,7 +43,9 @@ algorithm may change.
   itself is conditional (`attribute_not_exists(PK)`) so a concurrent duplicate can't
   overwrite the stored attempt. `occurredAt` is rejected rather than clamped so the
   same request always yields the same key.
-- `target` and `attemptId` can't contain `#` (the SK delimiter).
+- `target` is trimmed and lowercased before it is keyed, stored or returned (the same form
+  `correct` is judged on), so `Cat`, `cat` and ` cat ` share one history; it must be non-empty
+  after trimming. `target` and `attemptId` can't contain `#` (the SK delimiter).
 - **Trust model:** the client reports the `target`, so this blocks client-asserted
   mastery and client bugs, not a caller who knows the answer. Making correctness
   tamper-resistant would need a server-issued challenge flow (`startChallenge` stores

@@ -88,4 +88,4 @@ export interface AttemptItem {
 }
 
 // Values prepareAttempt validates/derives once, for recordAttempt to reuse.
-export type AttemptStash = { attempt: { sk: string; occurredAt: string; correct: boolean } };
+export type AttemptStash = { attempt: { sk: string; target: string; occurredAt: string; correct: boolean } };
