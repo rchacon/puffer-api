@@ -40,9 +40,23 @@ type Attempt {
   receivedAt: AWSDateTime!
 }
 
+"""
+A child's progress on one target, derived from their attempts. It trails the
+attempts slightly: a new attempt is reflected here a moment after it is recorded.
+"""
+type Progress {
+  childId: ID!
+  activity: Activity!
+  target: String!
+  status: ProgressStatus!
+  attemptCount: Int!
+  lastPracticedAt: AWSDateTime!
+}
+
 type Query {
   myProfile: Parent
   myChildren: [Child!]!
+  childProgress(childId: ID!, activity: Activity!, status: ProgressStatus): [Progress!]!
 }
 
 input CreateChildProfileInput {
