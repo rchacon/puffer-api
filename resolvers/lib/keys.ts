@@ -1,4 +1,4 @@
-import type { Activity } from './types.js';
+import type { Activity, ProgressStatus } from './types.js';
 
 // Partition key shared by a parent's own profile item and all of their child
 // items, so "parent + all children" is one Query on this PK (see myChildren).
@@ -41,4 +41,21 @@ export function attemptHistoryPk(childId: string, activity: Activity, target: st
 // attemptId to keep attempts at the same instant distinct.
 export function attemptHistorySk(occurredAt: string, attemptId: string): string {
   return `${occurredAt}#${attemptId}`;
+}
+
+// Sort key for a target's progress summary within its child's CHILD# partition.
+export function progressSk(activity: Activity, target: string): string {
+  return `PROGRESS#${activity}#${target}`;
+}
+
+// GSI1 partition key holding every progress summary for one child and
+// activity, so "this child's words" is a single Query on GSI1.
+export function statusIndexPk(childId: string, activity: Activity): string {
+  return `CHILD#${childId}#ACTIVITY#${activity}`;
+}
+
+// GSI1 sort key for a progress summary: grouped by status, then target, so one
+// status is a begins_with('STATUS#<status>#') Query.
+export function statusIndexSk(status: ProgressStatus, target: string): string {
+  return `STATUS#${status}#TARGET#${target}`;
 }

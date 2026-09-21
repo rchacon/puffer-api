@@ -3,8 +3,9 @@
 //    resolver/pipeline-function, `@aws-appsync/utils` kept external so it
 //    resolves to AppSync's real runtime implementation at deploy time (the
 //    npm package itself is types-only -- see docs/architecture.md).
-//  - build/lambda/postConfirmation.zip -- a single self-contained bundle
-//    (dependencies included) for the Cognito Post Confirmation trigger.
+//  - build/lambda/<name>.zip -- a single self-contained bundle (dependencies
+//    included) per Lambda: the Cognito Post Confirmation trigger and the
+//    progress projector (DynamoDB Streams).
 //  - build/schema.graphql -- copied as-is.
 //
 // Terraform (puffer-infra) never runs this -- it only ever references
@@ -44,27 +45,32 @@ async function buildResolverDir(sourceDir, outDir) {
 await buildResolverDir('resolvers', join(BUILD_DIR, 'resolvers'));
 await buildResolverDir('resolvers/functions', join(BUILD_DIR, 'resolvers', 'functions'));
 
-const lambdaOutDir = join(BUILD_DIR, 'lambda', 'postConfirmation');
-mkdirSync(lambdaOutDir, { recursive: true });
-await build({
-  entryPoints: ['lambdas/postConfirmation/index.ts'],
-  // CJS, not ESM: the AWS SDK's CJS internals (@smithy/node-http-handler)
-  // dynamically require() Node built-ins in a way that doesn't survive
-  // esbuild's ESM output without an interop shim. CJS needs no shim, and
-  // Lambda's Node runtime treats a bundle-less .js file as CJS by default
-  // (no package.json in the zip to say otherwise).
-  outfile: join(lambdaOutDir, 'index.js'),
-  bundle: true,
-  format: 'cjs',
-  target: 'node20',
-  platform: 'node',
-});
-// Unambiguously CJS regardless of any outer/ambient package.json (this repo's
-// own package.json says "type": "module") -- Lambda's runtime, and anything
-// else that loads this zip's index.js directly, should never have to guess.
-writeFileSync(join(lambdaOutDir, 'package.json'), JSON.stringify({ type: 'commonjs' }) + '\n');
-execSync(`zip -qr ../postConfirmation.zip .`, { cwd: lambdaOutDir, stdio: 'inherit' });
-console.log(`Built ${join(BUILD_DIR, 'lambda', 'postConfirmation.zip')}`);
+async function buildLambda(name) {
+  const lambdaOutDir = join(BUILD_DIR, 'lambda', name);
+  mkdirSync(lambdaOutDir, { recursive: true });
+  await build({
+    entryPoints: [`lambdas/${name}/index.ts`],
+    // CJS, not ESM: the AWS SDK's CJS internals (@smithy/node-http-handler)
+    // dynamically require() Node built-ins in a way that doesn't survive
+    // esbuild's ESM output without an interop shim. CJS needs no shim, and
+    // Lambda's Node runtime treats a bundle-less .js file as CJS by default
+    // (no package.json in the zip to say otherwise).
+    outfile: join(lambdaOutDir, 'index.js'),
+    bundle: true,
+    format: 'cjs',
+    target: 'node20',
+    platform: 'node',
+  });
+  // Unambiguously CJS regardless of any outer/ambient package.json (this repo's
+  // own package.json says "type": "module") -- Lambda's runtime, and anything
+  // else that loads this zip's index.js directly, should never have to guess.
+  writeFileSync(join(lambdaOutDir, 'package.json'), JSON.stringify({ type: 'commonjs' }) + '\n');
+  execSync(`zip -qr ../${name}.zip .`, { cwd: lambdaOutDir, stdio: 'inherit' });
+  console.log(`Built ${join(BUILD_DIR, 'lambda', `${name}.zip`)}`);
+}
+
+await buildLambda('postConfirmation');
+await buildLambda('progressProjector');
 
 cpSync('schema.graphql', join(BUILD_DIR, 'schema.graphql'));
 console.log(`Copied schema.graphql`);

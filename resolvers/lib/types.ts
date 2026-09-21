@@ -95,3 +95,20 @@ export interface AttemptItem {
 // Values prepareAttempt validates/derives once, for recordAttempt to reuse. `target`
 // is the canonical (trimmed, lowercased) form.
 export type AttemptStash = { attempt: { target: string; correct: boolean } };
+
+// Shape of a progress summary item as stored in DynamoDB (see progressSk). It is
+// derived from a target's attempts by the progressProjector Lambda and can be
+// rebuilt from them at any time.
+export interface ProgressItem {
+  PK: string;
+  SK: string;
+  GSI1PK: string;
+  GSI1SK: string;
+  childId: string;
+  activity: Activity;
+  target: string;
+  status: ProgressStatus;
+  attemptCount: number;
+  lastPracticedAt: string;
+  policyVersion: number;
+}
