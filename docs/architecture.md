@@ -10,15 +10,15 @@ the GraphQL schema, resolvers, and application Lambdas only.
 
 ## DynamoDB — single table
 
-One table, generic `PK`/`SK`, no secondary indexes yet. The portal's status-filtered
-progress query will need one (a `GSI1`), added together with the status-derivation
-follow-up (see below).
+One table, generic `PK`/`SK`, plus `GSI1` (`GSI1PK`/`GSI1SK`). Only some items carry the
+`GSI1` attributes (a sparse index): attempts, so one target's history is a single `Query`,
+and — once progress is derived — progress summaries, so the portal can filter by status.
 
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, `GSI1SK = <occurredAt>#<attemptId>` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
@@ -31,30 +31,26 @@ algorithm may change.
 - `activity` is `SIGHT_WORD` today; `target` is the thing practiced (the word itself
   for sight words). `ChallengeType` is `MULTIPLE_CHOICE` (recognition) or `SPELL`
   (hard mode); more values can be added without breaking clients.
-- The SK puts `<activity>#<target>` first so one target's full history (what the
-  mastery rule needs) is a single `begins_with` `Query`. `occurredAt` is the client's
-  time (canonical UTC ISO-8601, so it sorts chronologically) and `receivedAt` is the
-  server's; `occurredAt` is rejected if more than 5 minutes in the future or 30 days
-  old.
-- **Idempotent retries:** the client supplies `attemptId` and `occurredAt`, so a retry
-  maps to the same key. `prepareAttempt` reads that key first; if the attempt exists,
-  `recordAttempt` returns it (`runtime.earlyReturn`) instead of writing, or raises
-  `Conflict` if the same `attemptId` came back with a different answer, challenge type
-  or `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`)
-  so a concurrent duplicate can't overwrite the stored attempt. `occurredAt` is
-  rejected rather than clamped so the same request always yields the same key.
-  - **Client contract:** because `occurredAt` is part of the key, a retry must resend
-    the identical payload. Generate `attemptId` and `occurredAt` once, when the child
-    answers, and store them with the attempt until it is recorded. A retry with the
-    same `attemptId` but a different `occurredAt` looks like a new attempt and is
-    stored as a duplicate. (Documented on `RecordAttemptInput` in the schema.)
-  - **Deferred:** making `attemptId` the sole idempotency key (`ATTEMPT#<attemptId>`,
-    with per-target history read from a `GSI1` instead of the sort key) would remove
-    that caveat, and the follow-up PR needs a `GSI1` for the status query anyway.
-    Nothing is deployed, so changing the key format then needs no migration.
+- `occurredAt` is the client's time (canonical UTC ISO-8601, so it sorts chronologically)
+  and `receivedAt` is the server's; `occurredAt` is rejected if more than 5 minutes in the
+  future or 30 days old (rejected rather than clamped, so a bad clock is visible to the
+  client instead of silently rewriting the history).
+- One target's full history (what progress derivation needs) is a single `Query` on
+  `GSI1` with `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, in
+  chronological order. GSI reads are eventually consistent.
+- **Idempotent retries:** `attemptId` is the attempt's identity and its only idempotency
+  key (the sort key is `ATTEMPT#<attemptId>`). `prepareAttempt` reads that key first; if
+  the attempt exists, `recordAttempt` returns it (`runtime.earlyReturn`) instead of
+  writing, ignoring the retry's `occurredAt` — the stored attempt keeps its original time,
+  and this holds even if that timestamp has since aged out of the accepted window (the
+  window is only checked for a new attempt). It raises `Conflict` if the same `attemptId`
+  came back with a different activity, target, challenge type, answer or
+  `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`) so a
+  concurrent duplicate can't overwrite the stored attempt. Clients should generate
+  `attemptId` once, when the child answers, and reuse it for every retry.
 - `target` is trimmed and lowercased before it is keyed, stored or returned (the same form
   `correct` is judged on), so `Cat`, `cat` and ` cat ` share one history; it must be non-empty
-  after trimming. `target` and `attemptId` can't contain `#` (the SK delimiter).
+  after trimming. `target` and `attemptId` can't contain `#` (the delimiter in the keys built from them).
 - **Trust model:** the client reports the `target`, so this blocks client-asserted
   mastery and client bugs, not a caller who knows the answer. Making correctness
   tamper-resistant would need a server-issued challenge flow (`startChallenge` stores

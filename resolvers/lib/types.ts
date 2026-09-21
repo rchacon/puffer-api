@@ -75,6 +75,8 @@ export interface RecordAttemptInput {
 export interface AttemptItem {
   PK: string;
   SK: string;
+  GSI1PK: string;
+  GSI1SK: string;
   id: string;
   childId: string;
   activity: Activity;
@@ -87,5 +89,6 @@ export interface AttemptItem {
   receivedAt: string;
 }
 
-// Values prepareAttempt validates/derives once, for recordAttempt to reuse.
-export type AttemptStash = { attempt: { sk: string; target: string; occurredAt: string; correct: boolean } };
+// Values prepareAttempt validates/derives once, for recordAttempt to reuse. `target`
+// is the canonical (trimmed, lowercased) form.
+export type AttemptStash = { attempt: { target: string; correct: boolean } };

@@ -181,7 +181,7 @@ describe('recordAttempt (pipeline)', () => {
     expect(b).toMatchObject({ target: 'cat', correct: true });
     const items = (await storedAttempts(child.id)).map((i) => unmarshall(i));
     expect(items).toHaveLength(2);
-    expect(items.every((i) => i.SK.startsWith('ATTEMPT#SIGHT_WORD#cat#'))).toBe(true);
+    expect(items.every((i) => i.GSI1PK === `CHILD#${child.id}#ACTIVITY#SIGHT_WORD#TARGET#cat`)).toBe(true);
     expect(items.every((i) => i.target === 'cat')).toBe(true);
   });
 
@@ -208,6 +208,42 @@ describe('recordAttempt (pipeline)', () => {
 
     expect(retry).toEqual(first);
     expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('treats attemptId as the attempt identity: a retry with a different occurredAt returns the stored attempt', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const first = await record(
+      parentSub,
+      attemptInput(child.id, { occurredAt: new Date(Date.now() - 10 * 86_400_000).toISOString() })
+    );
+
+    // Different time, even one that is now outside the accepted window.
+    const retryLater = await record(parentSub, {
+      ...attemptInput(child.id),
+      attemptId: first.id,
+      occurredAt: new Date().toISOString(),
+    });
+    const retryAncient = await record(parentSub, {
+      ...attemptInput(child.id),
+      attemptId: first.id,
+      occurredAt: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+    });
+
+    expect(retryLater).toEqual(first);
+    expect(retryAncient).toEqual(first);
+    expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('rejects reusing an attemptId for a different target', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const input = attemptInput(child.id);
+
+    await record(parentSub, input);
+    await expect(
+      record(parentSub, { ...input, target: 'otter', answer: 'otter' })
+    ).rejects.toThrow('already used');
   });
 
   it('rejects reusing an attemptId with different presented options', async () => {

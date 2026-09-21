@@ -46,9 +46,9 @@ input CreateChildProfileInput {
 }
 
 """
-A retry of the same attempt must resend an identical payload. `attemptId` and
-`occurredAt` together identify the attempt, so generate both once, when the child
-answers, and store them with the attempt until it is recorded.
+`attemptId` identifies the attempt: recording it again returns the stored attempt
+instead of writing a second one, so it is safe to retry. Generate it once, when the
+child answers, and reuse it for every retry.
 """
 input RecordAttemptInput {
   """Unique per attempt (8-64 characters, no '#'), e.g. a UUID or ULID."""
@@ -59,7 +59,10 @@ input RecordAttemptInput {
   challengeType: ChallengeType!
   answer: String!
   presentedOptions: [String!]
-  """When the child answered. Must be identical on every retry of this attempt."""
+  """
+  When the child answered. Ignored on a retry of an attempt already recorded (the
+  stored attempt keeps its original time).
+  """
   occurredAt: AWSDateTime!
 }
 
