@@ -45,6 +45,9 @@ export type Activity = 'SIGHT_WORD';
 // Mirrors the ChallengeType enum in schema.graphql.
 export type ChallengeType = 'MULTIPLE_CHOICE' | 'SPELL';
 
+// Mirrors the ProgressStatus enum in schema.graphql.
+export type ProgressStatus = 'IN_PROGRESS' | 'NEEDS_SUPPORT' | 'MASTERED';
+
 // Mirrors the Attempt type in schema.graphql.
 export interface Attempt {
   id: string;

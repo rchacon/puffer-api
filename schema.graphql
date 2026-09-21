@@ -23,6 +23,12 @@ enum ChallengeType {
   SPELL
 }
 
+enum ProgressStatus {
+  IN_PROGRESS
+  NEEDS_SUPPORT
+  MASTERED
+}
+
 type Attempt {
   id: ID!
   childId: ID!
