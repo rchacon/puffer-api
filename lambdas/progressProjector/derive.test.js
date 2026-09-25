@@ -22,11 +22,13 @@ const status = (attempts) => deriveProgress(attempts).status;
 
 describe('deriveProgress: counts and bookkeeping', () => {
   it('counts attempts, reports the latest time and the policy version', () => {
-    const result = deriveProgress([choose(2), spell(5), choose(1)]);
+    const latest = spell(5);
+    const result = deriveProgress([choose(2), latest, choose(1)]);
     expect(result).toEqual({
       status: 'IN_PROGRESS',
       attemptCount: 3,
       lastPracticedAt: new Date(START + 5 * DAY).toISOString(),
+      lastAttemptKey: `${latest.occurredAt}#${latest.id}`,
       policyVersion: POLICY_VERSION,
     });
   });

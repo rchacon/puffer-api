@@ -19,7 +19,7 @@ and — once progress is derived — progress summaries, so the portal can filte
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
 | Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, `GSI1SK = <occurredAt>#<attemptId>` |
-| Progress summary | `CHILD#<childId>` | `PROGRESS#<activity>#<target>` | Derived, rebuildable. `status`, `attemptCount`, `lastPracticedAt`, `policyVersion`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>`, `GSI1SK = STATUS#<status>#TARGET#<target>` |
+| Progress summary | `CHILD#<childId>` | `PROGRESS#<activity>#<target>` | Derived, rebuildable. `status`, `attemptCount`, `lastPracticedAt`, `lastAttemptKey`, `policyVersion`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>`, `GSI1SK = STATUS#<status>#TARGET#<target>` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
@@ -67,8 +67,18 @@ DynamoDB Stream. For each newly inserted attempt it reads that target's history 
 the index may not have the newest one yet), runs `deriveProgress`
 (`lambdas/progressProjector/derive.ts`) and overwrites the target's progress summary.
 Because it recomputes every derived field from the full history rather than
-incrementing, replays and races just rewrite the same values. It ignores everything but
+incrementing, replays just rewrite the same values. It ignores everything but
 inserts of `ATTEMPT#` items, including the summaries it writes itself.
+
+**Concurrent writers.** Two writers can race on the same target's summary -- most
+plausibly a manual rebuild (see below) running against a child who's actively
+playing, since a rebuild sits outside the stream's per-shard ordering. Each summary
+carries `lastAttemptKey` (the most recent attempt folded into it, `<occurredAt>#<id>`),
+and the write is conditioned on it: a writer computed from older or smaller data than
+what's already stored loses the race harmlessly (its `PutItem` is rejected, silently,
+rather than clobbering the fresher summary). A tie is allowed through rather than
+rejected, so a rebuild re-deriving the *same* attempts under a bumped `POLICY_VERSION`
+can still overwrite the summary it's meant to correct.
 
 **Rules (policy version 1)**, all in `derive.ts`, kept apart so they can change:
 

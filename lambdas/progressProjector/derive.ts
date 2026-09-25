@@ -16,6 +16,12 @@ export interface DerivedProgress {
   status: ProgressStatus;
   attemptCount: number;
   lastPracticedAt: string;
+  // Identifies the most recent attempt folded into this summary, in the same
+  // `<occurredAt>#<id>` ordering `byTime` sorts by. Lets a write be guarded
+  // (see writeProgress in ./index.ts) against overwriting a summary already
+  // computed from newer or equally-current data -- e.g. a manual rebuild
+  // racing a live stream batch for the same target.
+  lastAttemptKey: string;
   policyVersion: number;
 }
 
@@ -91,6 +97,7 @@ export function deriveProgress(attempts: AttemptRecord[]): DerivedProgress {
     status,
     attemptCount: sorted.length,
     lastPracticedAt: last.occurredAt,
+    lastAttemptKey: `${last.occurredAt}#${last.id}`,
     policyVersion: POLICY_VERSION,
   };
 }

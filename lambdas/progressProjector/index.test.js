@@ -79,6 +79,7 @@ describe('progressProjector: stream events', () => {
       status: 'IN_PROGRESS',
       attemptCount: 1,
       lastPracticedAt: item.occurredAt,
+      lastAttemptKey: attemptHistorySk(item.occurredAt, item.id),
       policyVersion: POLICY_VERSION,
       GSI1PK: `CHILD#${childId}#ACTIVITY#SIGHT_WORD`,
       GSI1SK: 'STATUS#IN_PROGRESS#TARGET#frog',
@@ -189,6 +190,38 @@ describe('progressProjector: stream events', () => {
     });
     expect(await getProgress(childId, 'frog')).toBeNull();
     expect(await getProgress(childId, 'cat')).toMatchObject({ attemptCount: 1 });
+  });
+
+  it("doesn't let a writer with older data clobber a summary already reflecting newer data", async () => {
+    const childId = randomUUID();
+    const stale = attemptItem(childId, 'frog', 0, 'SPELL', true);
+    const newer = attemptItem(childId, 'frog', 5, 'SPELL', true);
+
+    // Simulate a summary a concurrent writer already advanced past `stale`,
+    // e.g. a live stream batch that raced ahead of a rebuild still working
+    // from an older snapshot.
+    await store({
+      PK: childPk(childId),
+      SK: progressSk('SIGHT_WORD', 'frog'),
+      GSI1PK: `CHILD#${childId}#ACTIVITY#SIGHT_WORD`,
+      GSI1SK: 'STATUS#IN_PROGRESS#TARGET#frog',
+      childId,
+      activity: 'SIGHT_WORD',
+      target: 'frog',
+      status: 'IN_PROGRESS',
+      attemptCount: 2,
+      lastPracticedAt: newer.occurredAt,
+      lastAttemptKey: attemptHistorySk(newer.occurredAt, newer.id),
+      policyVersion: POLICY_VERSION,
+    });
+
+    const result = await handler({ Records: [insertRecord(stale)] });
+
+    expect(result).toEqual({ batchItemFailures: [] });
+    expect(await getProgress(childId, 'frog')).toMatchObject({
+      attemptCount: 2,
+      lastAttemptKey: attemptHistorySk(newer.occurredAt, newer.id),
+    });
   });
 });
 

@@ -120,5 +120,6 @@ export interface ProgressItem {
   status: ProgressStatus;
   attemptCount: number;
   lastPracticedAt: string;
+  lastAttemptKey: string;
   policyVersion: number;
 }

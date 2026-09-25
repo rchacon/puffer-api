@@ -1,5 +1,5 @@
 import type { DynamoDBBatchItemFailure, DynamoDBBatchResponse, DynamoDBRecord, DynamoDBStreamEvent } from 'aws-lambda';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import {
   attemptHistoryPk,
@@ -105,6 +105,13 @@ async function queryHistory({ childId, activity, target }: TargetKey): Promise<A
 // Recomputes and stores one target's summary from its attempts. It overwrites
 // every derived field, so replaying a stream record (or racing a rebuild) just
 // rewrites the same values.
+//
+// The write is conditioned on `lastAttemptKey` so a writer computed from an
+// older or smaller set of attempts can't clobber one already reflecting more
+// (e.g. a manual rebuild racing a live stream batch for the same target: see
+// "what protections" discussion). A tie is allowed through, not just a strict
+// advance -- a rebuild re-deriving the *same* attempts under a bumped
+// POLICY_VERSION must still be able to overwrite the summary it's correcting.
 async function writeProgress(key: TargetKey, attempts: AttemptRecord[]): Promise<void> {
   const derived = deriveProgress(attempts);
   const item: ProgressItem = {
@@ -117,7 +124,23 @@ async function writeProgress(key: TargetKey, attempts: AttemptRecord[]): Promise
     target: key.target,
     ...derived,
   };
-  await client.send(new PutCommand({ TableName: TABLE_NAME, Item: item }));
+  try {
+    await client.send(
+      new PutCommand({
+        TableName: TABLE_NAME,
+        Item: item,
+        ConditionExpression:
+          'attribute_not_exists(PK) OR attribute_not_exists(lastAttemptKey) OR :lastAttemptKey >= lastAttemptKey',
+        ExpressionAttributeValues: { ':lastAttemptKey': item.lastAttemptKey },
+      })
+    );
+  } catch (err) {
+    // Lost the race to a writer already holding newer data -- its write
+    // stands, so there's nothing left for this one to do.
+    if (!(err instanceof ConditionalCheckFailedException)) {
+      throw err;
+    }
+  }
 }
 
 function mergeById(known: AttemptRecord[], stored: AttemptRecord[]): AttemptRecord[] {
