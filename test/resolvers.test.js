@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
+import { GetItemCommand, PutItemCommand, QueryCommand } from '@aws-sdk/client-dynamodb';
 import { createTable } from '../scripts/create-table.js';
 import {
   dynamoClient,
@@ -16,6 +16,10 @@ import * as createChildProfile from '../resolvers/Mutation.createChildProfile.ts
 import * as verifyChildOwnership from '../resolvers/functions/verifyChildOwnership.ts';
 import * as recordAttemptMutation from '../resolvers/Mutation.recordAttempt.ts';
 import * as prepareAttempt from '../resolvers/functions/prepareAttempt.ts';
+import * as childProgressQuery from '../resolvers/Query.childProgress.ts';
+import * as queryChildProgress from '../resolvers/functions/queryChildProgress.ts';
+import { handler as projectProgress } from '../lambdas/progressProjector/index.ts';
+import { attemptSk, childPk } from '../resolvers/lib/keys.ts';
 import * as recordAttempt from '../resolvers/functions/recordAttempt.ts';
 
 function ctxFor(sub, args = {}) {
@@ -181,7 +185,6 @@ describe('recordAttempt (pipeline)', () => {
     expect(b).toMatchObject({ target: 'cat', correct: true });
     const items = (await storedAttempts(child.id)).map((i) => unmarshall(i));
     expect(items).toHaveLength(2);
-    expect(items.every((i) => i.SK.startsWith('ATTEMPT#SIGHT_WORD#cat#'))).toBe(true);
     expect(items.every((i) => i.target === 'cat')).toBe(true);
   });
 
@@ -208,6 +211,42 @@ describe('recordAttempt (pipeline)', () => {
 
     expect(retry).toEqual(first);
     expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('treats attemptId as the attempt identity: a retry with a different occurredAt returns the stored attempt', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const first = await record(
+      parentSub,
+      attemptInput(child.id, { occurredAt: new Date(Date.now() - 10 * 86_400_000).toISOString() })
+    );
+
+    // Different time, even one that is now outside the accepted window.
+    const retryLater = await record(parentSub, {
+      ...attemptInput(child.id),
+      attemptId: first.id,
+      occurredAt: new Date().toISOString(),
+    });
+    const retryAncient = await record(parentSub, {
+      ...attemptInput(child.id),
+      attemptId: first.id,
+      occurredAt: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+    });
+
+    expect(retryLater).toEqual(first);
+    expect(retryAncient).toEqual(first);
+    expect(await storedAttempts(child.id)).toHaveLength(1);
+  });
+
+  it('rejects reusing an attemptId for a different target', async () => {
+    const parentSub = randomUUID();
+    const child = await newChild(parentSub);
+    const input = attemptInput(child.id);
+
+    await record(parentSub, input);
+    await expect(
+      record(parentSub, { ...input, target: 'otter', answer: 'otter' })
+    ).rejects.toThrow('already used');
   });
 
   it('rejects reusing an attemptId with different presented options', async () => {
@@ -284,5 +323,109 @@ describe('recordAttempt (pipeline)', () => {
 
     await expect(record(attacker, attemptInput(child.id))).rejects.toThrow('not found');
     expect(await storedAttempts(child.id)).toHaveLength(0);
+  });
+});
+
+describe('childProgress (pipeline), fed by recordAttempt and the projector', () => {
+  const recordPipeline = [verifyChildOwnership, prepareAttempt, recordAttempt];
+  const queryPipeline = [verifyChildOwnership, queryChildProgress];
+  const daysAgo = (n) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+  async function record(parentSub, childId, target, overrides = {}) {
+    const attempt = await runPipelineResolver(
+      recordPipeline,
+      ctxFor(parentSub, {
+        input: {
+          attemptId: randomUUID(),
+          childId,
+          activity: 'SIGHT_WORD',
+          target,
+          challengeType: 'SPELL',
+          answer: target,
+          occurredAt: new Date().toISOString(),
+          ...overrides,
+        },
+      }),
+      recordAttemptMutation
+    );
+    return attempt;
+  }
+
+  // What the DynamoDB stream would hand the projector for a stored attempt.
+  async function streamRecord(childId, attemptId) {
+    const { Item } = await dynamoClient.send(
+      new GetItemCommand({
+        TableName: TABLE_NAME,
+        Key: marshall({ PK: childPk(childId), SK: attemptSk(attemptId) }),
+      })
+    );
+    return { eventID: attemptId, eventName: 'INSERT', dynamodb: { SequenceNumber: attemptId, NewImage: Item } };
+  }
+
+  function progressFor(parentSub, args) {
+    return runPipelineResolver(queryPipeline, ctxFor(parentSub, args), childProgressQuery);
+  }
+
+  it('lists derived progress, optionally filtered by status', async () => {
+    const parentSub = randomUUID();
+    const child = await runUnitResolver(createChildProfile, ctxFor(parentSub, { input: { name: 'Rio' } }));
+
+    // frog: correct spellings on three days spanning more than a week -> MASTERED.
+    const attempts = [
+      await record(parentSub, child.id, 'frog', { occurredAt: daysAgo(12) }),
+      await record(parentSub, child.id, 'frog', { occurredAt: daysAgo(8) }),
+      await record(parentSub, child.id, 'frog', { occurredAt: daysAgo(3) }),
+      // cat: two misses -> NEEDS_SUPPORT.
+      await record(parentSub, child.id, 'cat', { answer: 'kat', occurredAt: daysAgo(2) }),
+      await record(parentSub, child.id, 'cat', { answer: 'cot', occurredAt: daysAgo(1) }),
+      // owl: one right answer -> IN_PROGRESS.
+      await record(parentSub, child.id, 'owl'),
+    ];
+    const records = await Promise.all(attempts.map((a) => streamRecord(child.id, a.id)));
+    await projectProgress({ Records: records });
+
+    const all = await progressFor(parentSub, { childId: child.id, activity: 'SIGHT_WORD' });
+    // GSI1 groups by status (alphabetically), then target.
+    expect(all.map((p) => [p.target, p.status, p.attemptCount])).toEqual([
+      ['owl', 'IN_PROGRESS', 1],
+      ['frog', 'MASTERED', 3],
+      ['cat', 'NEEDS_SUPPORT', 2],
+    ]);
+    expect(all.find((p) => p.target === 'frog')).toMatchObject({
+      childId: child.id,
+      activity: 'SIGHT_WORD',
+      lastPracticedAt: attempts[2].occurredAt,
+    });
+
+    const needsSupport = await progressFor(parentSub, {
+      childId: child.id,
+      activity: 'SIGHT_WORD',
+      status: 'NEEDS_SUPPORT',
+    });
+    expect(needsSupport.map((p) => p.target)).toEqual(['cat']);
+  });
+
+  it('returns nothing for a child with no progress', async () => {
+    const parentSub = randomUUID();
+    const child = await runUnitResolver(createChildProfile, ctxFor(parentSub, { input: { name: 'Sam' } }));
+    expect(await progressFor(parentSub, { childId: child.id, activity: 'SIGHT_WORD' })).toEqual([]);
+  });
+
+  it('rejects reading progress for a child that is not the caller\'s', async () => {
+    const owner = randomUUID();
+    const child = await runUnitResolver(createChildProfile, ctxFor(owner, { input: { name: 'Ada' } }));
+
+    await expect(
+      progressFor(randomUUID(), { childId: child.id, activity: 'SIGHT_WORD' })
+    ).rejects.toThrow('not found');
+  });
+
+  it('queryChildProgress.response surfaces a failed data source call', () => {
+    const ctx = {
+      ...ctxFor(randomUUID(), { childId: 'c', activity: 'SIGHT_WORD' }),
+      result: null,
+      error: { message: 'ProvisionedThroughputExceededException', type: 'DynamoDB:ProvisionedThroughputExceededException' },
+    };
+    expect(() => queryChildProgress.response(ctx)).toThrow('ProvisionedThroughputExceededException');
   });
 });

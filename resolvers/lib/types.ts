@@ -45,6 +45,9 @@ export type Activity = 'SIGHT_WORD';
 // Mirrors the ChallengeType enum in schema.graphql.
 export type ChallengeType = 'MULTIPLE_CHOICE' | 'SPELL';
 
+// Mirrors the ProgressStatus enum in schema.graphql.
+export type ProgressStatus = 'IN_PROGRESS' | 'NEEDS_SUPPORT' | 'MASTERED';
+
 // Mirrors the Attempt type in schema.graphql.
 export interface Attempt {
   id: string;
@@ -87,5 +90,34 @@ export interface AttemptItem {
   receivedAt: string;
 }
 
-// Values prepareAttempt validates/derives once, for recordAttempt to reuse.
-export type AttemptStash = { attempt: { sk: string; target: string; occurredAt: string; correct: boolean } };
+// Values prepareAttempt validates/derives once, for recordAttempt to reuse. `target`
+// is the canonical (trimmed, lowercased) form.
+export type AttemptStash = { attempt: { target: string; correct: boolean } };
+
+// Mirrors the Progress type in schema.graphql.
+export interface Progress {
+  childId: string;
+  activity: Activity;
+  target: string;
+  status: ProgressStatus;
+  attemptCount: number;
+  lastPracticedAt: string;
+}
+
+// Shape of a progress summary item as stored in DynamoDB (see progressSk). It is
+// derived from a target's attempts by the progressProjector Lambda and can be
+// rebuilt from them at any time.
+export interface ProgressItem {
+  PK: string;
+  SK: string;
+  GSI1PK: string;
+  GSI1SK: string;
+  childId: string;
+  activity: Activity;
+  target: string;
+  status: ProgressStatus;
+  attemptCount: number;
+  lastPracticedAt: string;
+  lastAttemptKey: string;
+  policyVersion: number;
+}

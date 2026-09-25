@@ -7,11 +7,6 @@ type Args = { input: RecordAttemptInput };
 
 const MAX_TEXT_LENGTH = 64;
 const MAX_OPTIONS = 12;
-// A client may report an attempt made offline, but not one from the future or
-// from long ago. Rejected rather than clamped so the same request always maps
-// to the same attempt key, which is what makes a retry idempotent.
-const MAX_FUTURE_MS = 5 * 60 * 1000;
-const MAX_PAST_MS = 30 * 24 * 60 * 60 * 1000;
 
 function invalid(message: string): never {
   return util.error(message, 'ValidationError');
@@ -19,24 +14,27 @@ function invalid(message: string): never {
 
 // Validates the attempt, derives `correct` from the target (never from
 // anything the caller asserts about correctness), and looks for an existing
-// attempt with the same key so recordAttempt can return it instead of writing
-// a duplicate.
+// attempt with the same attemptId so recordAttempt can return it instead of
+// writing a duplicate. occurredAt's window is checked later, in recordAttempt,
+// and only for a new attempt: a retry of one already recorded must get the
+// stored attempt back even if its timestamp has since aged out of the window.
 export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptStash>>): DynamoDBGetItemRequest {
-  const { attemptId, activity, target, challengeType, answer, presentedOptions, occurredAt } = ctx.args.input;
+  const { attemptId, target, challengeType, answer, presentedOptions } = ctx.args.input;
 
-  // '#' delimits the attempt sort key's segments, so it can't appear in them.
+  // '#' delimits the segments of the keys built from these values.
   if (attemptId.length < 8 || attemptId.length > MAX_TEXT_LENGTH || attemptId.includes('#')) {
     invalid(`attemptId must be 8-${MAX_TEXT_LENGTH} characters and not contain '#'`);
   }
-  // The target is keyed, stored and returned in its canonical form (the same
+  if (answer.length > MAX_TEXT_LENGTH) {
+    invalid(`answer must be at most ${MAX_TEXT_LENGTH} characters`);
+  }
+
+  // The target is stored, keyed and returned in its canonical form (the same
   // one `correct` is judged on), so "Cat", "cat" and " cat " are one word with
-  // one history instead of three sort-key prefixes.
+  // one history instead of three.
   const normalizedTarget = normalizeText(target);
   if (normalizedTarget.length < 1 || normalizedTarget.length > MAX_TEXT_LENGTH || normalizedTarget.includes('#')) {
     invalid(`target must be 1-${MAX_TEXT_LENGTH} characters after trimming and not contain '#'`);
-  }
-  if (answer.length > MAX_TEXT_LENGTH) {
-    invalid(`answer must be at most ${MAX_TEXT_LENGTH} characters`);
   }
 
   const normalizedAnswer = normalizeText(answer);
@@ -58,25 +56,11 @@ export function request(ctx: CognitoContext<Args, unknown, any, Partial<AttemptS
     invalid(`presentedOptions is not allowed for ${challengeType}`);
   }
 
-  const occurredAtMs = util.time.parseISO8601ToEpochMilliSeconds(occurredAt);
-  const nowMs = util.time.nowEpochMilliSeconds();
-  if (occurredAtMs > nowMs + MAX_FUTURE_MS || occurredAtMs < nowMs - MAX_PAST_MS) {
-    invalid('occurredAt is outside the accepted window');
-  }
-  // Canonical UTC form, so equivalent inputs ("...+00:00" vs "...Z") share a key.
-  const canonicalOccurredAt = util.time.epochMilliSecondsToISO8601(occurredAtMs);
-
-  const sk = attemptSk(activity, normalizedTarget, canonicalOccurredAt, attemptId);
-  ctx.stash.attempt = {
-    sk,
-    target: normalizedTarget,
-    occurredAt: canonicalOccurredAt,
-    correct: normalizedAnswer === normalizedTarget,
-  };
+  ctx.stash.attempt = { target: normalizedTarget, correct: normalizedAnswer === normalizedTarget };
 
   return {
     operation: 'GetItem',
-    key: util.dynamodb.toMapValues({ PK: childPk(ctx.args.input.childId), SK: sk }),
+    key: util.dynamodb.toMapValues({ PK: childPk(ctx.args.input.childId), SK: attemptSk(attemptId) }),
     // Strongly consistent: a retry right after a write must see it.
     consistentRead: true,
   };

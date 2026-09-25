@@ -1,9 +1,9 @@
-name: deploy postConfirmation
+name: deploy progressProjector
 
 on:
   push:
     tags:
-      - 'postconfirmation-v*'
+      - 'progressprojector-v*'
 
 permissions:
   contents: read
@@ -25,9 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check tag version matches lambdas/postConfirmation/VERSION
+      - name: Check tag version matches lambdas/progressProjector/VERSION
         id: version
-        run: scripts/check-tag-version.sh "$GITHUB_REF_NAME" postconfirmation-v lambdas/postConfirmation/VERSION
+        run: scripts/check-tag-version.sh "$GITHUB_REF_NAME" progressprojector-v lambdas/progressProjector/VERSION
 
       - uses: actions/setup-node@v4
         with:
@@ -57,29 +57,29 @@ jobs:
         run: npm run typecheck
 
       - name: Build
-        run: npm run build -- postConfirmation
+        run: npm run build -- progressProjector
 
       - name: Sanity-check the built Lambda imports cleanly
-        run: node -e "console.log('Imported handler OK:', typeof require('./build/lambda/postConfirmation/index.js').handler)"
+        run: node -e "console.log('Imported handler OK:', typeof require('./build/lambda/progressProjector/index.js').handler)"
 
       - name: Check Lambda zip size against the 50MB direct-upload limit
         run: |
-          size=$(stat -c%s build/lambda/postConfirmation.zip)
-          echo "postConfirmation.zip: $size bytes"
+          size=$(stat -c%s build/lambda/progressProjector.zip)
+          echo "progressProjector.zip: $size bytes"
           if [ "$size" -gt 52428800 ]; then
-            echo "::error::postConfirmation.zip exceeds Lambda's 50MB direct-upload limit ($size bytes). This needs an S3-upload path, not yet implemented."
+            echo "::error::progressProjector.zip exceeds Lambda's 50MB direct-upload limit ($size bytes). This needs an S3-upload path, not yet implemented."
             exit 1
           fi
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.POSTCONFIRMATION_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.PROGRESSPROJECTOR_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Deploy Lambda
         run: |
           aws lambda update-function-code \
-            --function-name "${{ vars.POST_CONFIRMATION_FUNCTION_NAME }}" \
-            --zip-file fileb://build/lambda/postConfirmation.zip
+            --function-name "${{ vars.PROGRESS_PROJECTOR_FUNCTION_NAME }}" \
+            --zip-file fileb://build/lambda/progressProjector.zip
           aws lambda wait function-updated \
-            --function-name "${{ vars.POST_CONFIRMATION_FUNCTION_NAME }}"
+            --function-name "${{ vars.PROGRESS_PROJECTOR_FUNCTION_NAME }}"

@@ -10,15 +10,16 @@ the GraphQL schema, resolvers, and application Lambdas only.
 
 ## DynamoDB — single table
 
-One table, generic `PK`/`SK`, no secondary indexes yet. The portal's status-filtered
-progress query will need one (a `GSI1`), added together with the status-derivation
-follow-up (see below).
+One table, generic `PK`/`SK`, plus `GSI1` (`GSI1PK`/`GSI1SK`). Only one item type carries
+the `GSI1` attributes (a sparse index): progress summaries, so the portal can filter by
+status.
 
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<activity>#<target>#<occurredAt>#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
+| Progress summary | `CHILD#<childId>` | `PROGRESS#<activity>#<target>` | Derived, rebuildable. `status`, `attemptCount`, `lastPracticedAt`, `lastAttemptKey`, `policyVersion`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>`, `GSI1SK = STATUS#<status>#TARGET#<target>` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
 the caller: `recordAttempt` stores what happened, and the server decides `correct` by
@@ -31,46 +32,86 @@ algorithm may change.
 - `activity` is `SIGHT_WORD` today; `target` is the thing practiced (the word itself
   for sight words). `ChallengeType` is `MULTIPLE_CHOICE` (recognition) or `SPELL`
   (hard mode); more values can be added without breaking clients.
-- The SK puts `<activity>#<target>` first so one target's full history (what the
-  mastery rule needs) is a single `begins_with` `Query`. `occurredAt` is the client's
-  time (canonical UTC ISO-8601, so it sorts chronologically) and `receivedAt` is the
-  server's; `occurredAt` is rejected if more than 5 minutes in the future or 30 days
-  old.
-- **Idempotent retries:** the client supplies `attemptId` and `occurredAt`, so a retry
-  maps to the same key. `prepareAttempt` reads that key first; if the attempt exists,
-  `recordAttempt` returns it (`runtime.earlyReturn`) instead of writing, or raises
-  `Conflict` if the same `attemptId` came back with a different answer, challenge type
-  or `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`)
-  so a concurrent duplicate can't overwrite the stored attempt. `occurredAt` is
-  rejected rather than clamped so the same request always yields the same key.
-  - **Client contract:** because `occurredAt` is part of the key, a retry must resend
-    the identical payload. Generate `attemptId` and `occurredAt` once, when the child
-    answers, and store them with the attempt until it is recorded. A retry with the
-    same `attemptId` but a different `occurredAt` looks like a new attempt and is
-    stored as a duplicate. (Documented on `RecordAttemptInput` in the schema.)
-  - **Deferred:** making `attemptId` the sole idempotency key (`ATTEMPT#<attemptId>`,
-    with per-target history read from a `GSI1` instead of the sort key) would remove
-    that caveat, and the follow-up PR needs a `GSI1` for the status query anyway.
-    Nothing is deployed, so changing the key format then needs no migration.
+- `occurredAt` is the client's time (canonical UTC ISO-8601, so it sorts chronologically)
+  and `receivedAt` is the server's; `occurredAt` is rejected if more than 5 minutes in the
+  future or 30 days old (rejected rather than clamped, so a bad clock is visible to the
+  client instead of silently rewriting the history).
+- One target's full history (what progress derivation needs) is a single, strongly
+  consistent `Query` on the base table (`PK = CHILD#<childId>`, `begins_with(SK,
+  'ATTEMPT#')`, filtered to the activity/target) -- not `GSI1`, even though attempts
+  still carry `GSI1PK`/`GSI1SK`. GSI reads are only ever eventually consistent, which
+  let two projector invocations processing different new attempts for the same target
+  each miss the other's, silently dropping one for good; the base table has no such
+  lag for a read that runs after the attempt's own write already committed, which is
+  always true by the time a stream record reaches the projector.
+- **Idempotent retries:** `attemptId` is the attempt's identity and its only idempotency
+  key (the sort key is `ATTEMPT#<attemptId>`). `prepareAttempt` reads that key first; if
+  the attempt exists, `recordAttempt` returns it (`runtime.earlyReturn`) instead of
+  writing, ignoring the retry's `occurredAt` — the stored attempt keeps its original time,
+  and this holds even if that timestamp has since aged out of the accepted window (the
+  window is only checked for a new attempt). It raises `Conflict` if the same `attemptId`
+  came back with a different activity, target, challenge type, answer or
+  `presentedOptions`. The write itself is conditional (`attribute_not_exists(PK)`) so a
+  concurrent duplicate can't overwrite the stored attempt. Clients should generate
+  `attemptId` once, when the child answers, and reuse it for every retry.
 - `target` is trimmed and lowercased before it is keyed, stored or returned (the same form
   `correct` is judged on), so `Cat`, `cat` and ` cat ` share one history; it must be non-empty
-  after trimming. `target` and `attemptId` can't contain `#` (the SK delimiter).
+  after trimming. `target` and `attemptId` can't contain `#` (the delimiter in the keys built from them).
 - **Trust model:** the client reports the `target`, so this blocks client-asserted
   mastery and client bugs, not a caller who knows the answer. Making correctness
   tamper-resistant would need a server-issued challenge flow (`startChallenge` stores
   the target and options; `submitAnswer` judges against them, with a server-assigned
   timestamp) — costing a round trip per question and offline play. Not planned for now.
 
-**Deferred: derived progress.** A follow-up PR will derive status and attempt counts
-from attempts into a rebuildable per-target summary item (with the `GSI1` keys it
-introduces, and a `policyVersion` recording which rule produced it). Proposed mastery rule: three correct
-`SPELL` attempts on three different days, the third at least a week after the first,
-and the two most recent `SPELL` attempts correct; recognition attempts only inform
-practice recommendations. Still to define: the `NEEDS_SUPPORT` rule and whether a
-"day" is UTC or per-child time zone. Writing the summary atomically with the attempt
-would need `TransactWriteItems`, which requires the table name inside resolver code —
-resolvers only receive `ApiId`/`DataSourceName` today, so that follow-up has to decide
-how to supply it (a template parameter, or a stream-driven projection instead).
+### Derived progress
+
+Status and counts are a *projection* of the attempts, never supplied by a caller. A
+**progress projector** Lambda (`lambdas/progressProjector`) consumes the table's
+DynamoDB Stream. For each newly inserted attempt it reads that target's history with a
+strongly consistent base-table query, merges in the attempts in its own batch (belt and
+suspenders -- the query is already consistent, but the merge means nothing depends on
+that), runs `deriveProgress` (`lambdas/progressProjector/derive.ts`) and overwrites the
+target's progress summary.
+Because it recomputes every derived field from the full history rather than
+incrementing, replays just rewrite the same values. It ignores everything but
+inserts of `ATTEMPT#` items, including the summaries it writes itself.
+
+**Concurrent writers.** Two writers can race on the same target's summary -- most
+plausibly a manual rebuild (see below) running against a child who's actively
+playing, since a rebuild sits outside the stream's per-shard ordering. Each summary
+carries `lastAttemptKey` (the most recent attempt folded into it, `<occurredAt>#<id>`),
+and the write is conditioned on it: a writer computed from older or smaller data than
+what's already stored loses the race harmlessly (its `PutItem` is rejected, silently,
+rather than clobbering the fresher summary). A tie is allowed through rather than
+rejected, so a rebuild re-deriving the *same* attempts under a bumped `POLICY_VERSION`
+can still overwrite the summary it's meant to correct.
+
+**Rules (policy version 1)**, all in `derive.ts`, kept apart so they can change:
+
+- `MASTERED`: correct `SPELL` attempts on at least three different **UTC days**, the
+  earliest and latest at least seven days apart, and the two most recent `SPELL`
+  attempts both correct. Recognition (`MULTIPLE_CHOICE`) attempts never establish
+  mastery, so they can't push a word to `MASTERED`, but they still count as attempts.
+  A later wrong spelling loses mastery.
+- `NEEDS_SUPPORT`: not mastered, and at least two of the last three attempts (any
+  challenge type) were wrong. It clears itself as the child improves.
+- Otherwise `IN_PROGRESS`.
+
+**Changing the rules.** Edit `derive.ts` and bump `POLICY_VERSION`, deploy, then rebuild
+from the attempts by invoking the Lambda with `{"rebuild":{"childId":"<id>"}}` (one
+child) or `{"rebuild":{}}` (every child; a table `Scan`, fine at this scale). Nothing in
+a summary is authoritative — `policyVersion` records which rule produced it.
+
+**Why a stream projector, not a resolver.** Writing the summary in the same request as
+the attempt would need `TransactWriteItems`, which requires the table name inside
+resolver code — resolvers only receive `ApiId`/`DataSourceName`. A projector keeps the
+attempt write a single atomic conditional `PutItem`, owns the rebuild path, and needs
+no table name in the resolvers. The cost is that progress **trails** attempts by a
+moment (`childProgress` may not yet reflect an attempt recorded a second ago).
+
+Known limits: `childProgress` returns one page of results (no pagination yet), which
+is ample for a child's word list; and "day" is UTC, so an evening attempt in a western
+time zone can land on the next UTC day.
 
 Deferred, not built for v1: rollup counters (e.g. `totalMastered`) on the child item
 kept in sync via DynamoDB Streams, useful for a portal dashboard but unnecessary
@@ -106,6 +147,10 @@ their own parent/child items and their children's attempts:
   the caller's own `sub` as the partition key.
 - `Mutation.createChildProfile` — direct resolver, writes under the caller's own
   parent partition.
+- `Query.childProgress(childId, activity, status)` — **pipeline** resolver
+  (`verifyChildOwnership` → `queryChildProgress`): lists a child's derived progress for
+  an activity from `GSI1`, optionally for one status. Results come back grouped by
+  status, then target.
 - `Mutation.recordAttempt` — **pipeline** resolver: `functions/verifyChildOwnership.js`
   runs first and raises a `NotFound` error unless the given `childId` belongs to the
   caller, then `functions/prepareAttempt.js` validates the input and looks for an existing
@@ -153,9 +198,11 @@ through it) isn't justified here.
    independently of the GraphQL app's `package.json` version).
 2. Tests + `tsc --noEmit` run again here (not just relying on `main` already
    being green), since a tag could in principle point at any commit.
-3. `scripts/build.mjs` bundles the Lambda (CJS — the AWS SDK's CJS internals
-   don't survive esbuild's ESM output without an interop shim) into
-   `build/lambda/postConfirmation.zip`.
+3. `scripts/build.mjs postConfirmation` bundles just this Lambda (CJS — the AWS
+   SDK's CJS internals don't survive esbuild's ESM output without an interop
+   shim) into `build/lambda/postConfirmation.zip` — scoped to this one target
+   so a build failure in `progressProjector` or the resolvers can't block this
+   deploy, matching the "versioned and deployed independently" claim above.
 4. A sanity check imports the built bundle and confirms `handler` is a function,
    and a size check fails clearly if the zip would exceed Lambda's 50MB
    direct-upload limit — both mirror `cd-api-deploy.yml`'s equivalent steps.
@@ -175,9 +222,10 @@ IaC tool.
 1. `scripts/check-tag-version.sh` checks the tag against `package.json`'s
    `version`.
 2. Tests + `tsc --noEmit`, same as above.
-3. `scripts/build.mjs` bundles each resolver (esbuild, `@aws-appsync/utils` kept
-   external so it resolves to AppSync's real runtime at deploy time) into
-   `build/resolvers/**/*.js`, and copies `schema.graphql`.
+3. `scripts/build.mjs resolvers` bundles each resolver (esbuild, `@aws-appsync/utils`
+   kept external so it resolves to AppSync's real runtime at deploy time) into
+   `build/resolvers/**/*.js`, and copies `schema.graphql` — scoped to just the
+   resolvers so a build failure in either Lambda can't block this deploy.
 4. `scripts/generate-appsync-template.mjs` generates `build/appsync-template.json`
    — a CloudFormation template (JSON, not YAML: resolver code and the schema
    definition are arbitrary multi-line strings, and `JSON.stringify` escapes
@@ -215,23 +263,52 @@ For `postconfirmation-v*`: an OIDC-trusted role ARN (`lambda:UpdateFunctionCode`
 `repo:rchacon/puffer-api:ref:refs/tags/postconfirmation-v*`, `AWS_REGION`, and
 the Lambda's function name.
 
+For `progressprojector-v*`: the same shape as `postconfirmation-v*` (an OIDC-trusted role
+ARN with `lambda:UpdateFunctionCode`/`lambda:GetFunction`, trusted for
+`repo:rchacon/puffer-api:ref:refs/tags/progressprojector-v*`, and the function name in
+`vars.PROGRESS_PROJECTOR_FUNCTION_NAME`).
+
 For `graphql-v*`: a separate OIDC-trusted role ARN (CloudFormation deploy
 permissions for the generated stack, plus the `appsync:*` actions its resources
 need) trusted for `repo:rchacon/puffer-api:ref:refs/tags/graphql-v*`, the
 AppSync API ID, and the data source name.
 
+### What `puffer-infra` needs for derived progress
+
+Nothing here is deployed by this repo; the Terraform in `puffer-infra` must provide:
+
+- `GSI1` on the table: partition key `GSI1PK` (S), sort key `GSI1SK` (S), projecting all
+  attributes. (`npm run create-table` creates it locally.)
+- A DynamoDB Stream on the table with `NEW_IMAGE`.
+- The `progressProjector` Lambda (Node 20, handler `index.handler`, `TABLE_NAME` set to
+  the table name) with an event source mapping on that stream: `ReportBatchItemFailures`
+  enabled, and a filter so it only sees inserted attempts, e.g.
+  `{"eventName":["INSERT"],"dynamodb":{"NewImage":{"SK":{"S":[{"prefix":"ATTEMPT#"}]}}}}`.
+  (The Lambda re-checks this itself, so the filter is an optimization, but without it the
+  summaries it writes would each trigger an invocation.)
+- Its IAM role: stream read (`dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream`,
+  `ListStreams`), `dynamodb:Query` on the table itself (not `index/GSI1` -- the projector
+  reads attempt history with a strongly consistent base-table query, not GSI1),
+  `dynamodb:PutItem`, and `dynamodb:Scan` (only for the all-children rebuild).
+- The AppSync data source role must be able to `dynamodb:Query` the `index/GSI1` (for
+  `childProgress`), in addition to the item access it already has.
+
 ## Local development & testing
 
 - **DynamoDB**: `docker compose up` runs `amazon/dynamodb-local`, then
   `npm run create-table` creates the table against it.
-- **Resolver/schema logic**: `npm test` runs `test/resolvers.test.js` and
-  `lambdas/postConfirmation/index.test.js` against the real Dockerized DynamoDB via
+- **Resolver/schema logic**: `npm test` runs `test/resolvers.test.js`,
+  `lambdas/postConfirmation/index.test.js` and `lambdas/progressProjector/*.test.js`
+  against the real Dockerized DynamoDB via
   `test/dynamoResolverHarness.js`, which executes each resolver's `request()` output
   as a real DynamoDB call and feeds the (unmarshalled) response back into
   `response()` — so tests exercise actual read/write behavior, not mocked SDK calls.
 - **CI**: `.github/workflows/test.yml` runs the same suite against a
   `dynamodb-local` GitHub Actions service container on every push/PR, so local and CI
   runs exercise identical DynamoDB behavior.
+- **Streams**: the projector's tests call its handler with stream records built from
+  stored items, so the DynamoDB Stream → Lambda wiring itself (event source mapping,
+  filter, batch-failure reporting) is only exercised against a real `dev` stack.
 - **AppSync & Cognito**: no solid open-source Docker/LocalStack story exists for
   these (LocalStack's coverage is Pro-only) — end-to-end checks of AppSync's own
   request/response mapping and Cognito authorization happen against a real, cheap
