@@ -73,6 +73,26 @@ function toRecord(item: Pick<AttemptItem, 'id' | 'challengeType' | 'correct' | '
   return { id: item.id, challengeType: item.challengeType, correct: item.correct, occurredAt: item.occurredAt };
 }
 
+// Pages through `send`'s results via ExclusiveStartKey/LastEvaluatedKey until
+// exhausted. Shared by queryHistory and scanAttempts, which otherwise differ
+// only in which command they issue (and, for scanAttempts, whether it's a
+// Query or a Scan).
+async function* paginate(
+  send: (startKey?: Record<string, unknown>) => Promise<{
+    Items?: Record<string, unknown>[];
+    LastEvaluatedKey?: Record<string, unknown>;
+  }>
+): AsyncGenerator<Record<string, unknown>> {
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const page = await send(startKey);
+    for (const item of page.Items ?? []) {
+      yield item;
+    }
+    startKey = page.LastEvaluatedKey;
+  } while (startKey);
+}
+
 // A target's full history, strongly consistent. Reads the base table rather
 // than GSI1: GSI reads are only ever eventually consistent, which let two
 // invocations processing different new attempts for the same target each
@@ -83,9 +103,8 @@ function toRecord(item: Pick<AttemptItem, 'id' | 'challengeType' | 'correct' | '
 // necessarily already committed.
 async function queryHistory({ childId, activity, target }: TargetKey): Promise<AttemptRecord[]> {
   const attempts: AttemptRecord[] = [];
-  let startKey: Record<string, unknown> | undefined;
-  do {
-    const page = await client.send(
+  const send = (startKey?: Record<string, unknown>) =>
+    client.send(
       new QueryCommand({
         TableName: TABLE_NAME,
         KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
@@ -100,11 +119,9 @@ async function queryHistory({ childId, activity, target }: TargetKey): Promise<A
         ExclusiveStartKey: startKey,
       })
     );
-    for (const item of (page.Items ?? []) as AttemptItem[]) {
-      attempts.push(toRecord(item));
-    }
-    startKey = page.LastEvaluatedKey;
-  } while (startKey);
+  for await (const item of paginate(send)) {
+    attempts.push(toRecord(item as unknown as AttemptItem));
+  }
   return attempts;
 }
 
@@ -217,10 +234,9 @@ async function projectStream(event: DynamoDBStreamEvent): Promise<DynamoDBBatchR
 
 // Every stored attempt for one child, or for all children, strongly consistent.
 async function* scanAttempts(childId?: string): AsyncGenerator<StoredAttempt> {
-  let startKey: Record<string, unknown> | undefined;
-  do {
-    const page = childId
-      ? await client.send(
+  const send = (startKey?: Record<string, unknown>) =>
+    childId
+      ? client.send(
           new QueryCommand({
             TableName: TABLE_NAME,
             KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
@@ -229,7 +245,7 @@ async function* scanAttempts(childId?: string): AsyncGenerator<StoredAttempt> {
             ExclusiveStartKey: startKey,
           })
         )
-      : await client.send(
+      : client.send(
           new ScanCommand({
             TableName: TABLE_NAME,
             FilterExpression: 'begins_with(SK, :prefix)',
@@ -238,11 +254,10 @@ async function* scanAttempts(childId?: string): AsyncGenerator<StoredAttempt> {
             ExclusiveStartKey: startKey,
           })
         );
-    for (const item of (page.Items ?? []) as AttemptItem[]) {
-      yield { ...toRecord(item), childId: item.childId, activity: item.activity, target: item.target };
-    }
-    startKey = page.LastEvaluatedKey;
-  } while (startKey);
+  for await (const image of paginate(send)) {
+    const item = image as unknown as AttemptItem;
+    yield { ...toRecord(item), childId: item.childId, activity: item.activity, target: item.target };
+  }
 }
 
 async function rebuildProgress(childId?: string): Promise<RebuildResult> {
