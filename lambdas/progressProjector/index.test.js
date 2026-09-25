@@ -198,8 +198,10 @@ describe('progressProjector: stream events', () => {
     const failingRecord = insertRecord(failing);
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Fail the first data source call, which is the failing target's GSI1 query
-    // (targets are projected in the order their records appear).
+    // Fail the first data source call, which is the failing target's history
+    // query -- targets are projected concurrently, but each group's own send
+    // calls still start in the order their records appear (a mapped async
+    // function runs synchronously up to its first await).
     const send = vi.spyOn(DynamoDBDocumentClient.prototype, 'send').mockRejectedValueOnce(new Error('boom'));
     const result = await handler({ Records: [failingRecord, okRecord] });
     send.mockRestore();

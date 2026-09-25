@@ -157,10 +157,16 @@ function mergeById(known: AttemptRecord[], stored: AttemptRecord[]): AttemptReco
   return [...byId.values()];
 }
 
+interface ProjectGroup {
+  key: TargetKey;
+  attempts: StoredAttempt[];
+  records: DynamoDBRecord[];
+}
+
 async function projectStream(event: DynamoDBStreamEvent): Promise<DynamoDBBatchResponse> {
   // Group the batch's new attempts by target: several records for one target
-  // need one derivation, and their attempts may not be in GSI1 yet.
-  const groups = new Map<string, { key: TargetKey; attempts: StoredAttempt[]; records: DynamoDBRecord[] }>();
+  // need one derivation, not one each.
+  const groups = new Map<string, ProjectGroup>();
   for (const record of event.Records) {
     const image = record.dynamodb?.NewImage;
     // Only newly inserted attempts matter. This also skips the progress
@@ -180,23 +186,32 @@ async function projectStream(event: DynamoDBStreamEvent): Promise<DynamoDBBatchR
     groups.set(gk, group);
   }
 
-  const batchItemFailures: DynamoDBBatchItemFailure[] = [];
-  for (const { key, attempts, records } of groups.values()) {
-    try {
+  // Different targets are fully independent (different partition keys), so
+  // they're projected concurrently rather than one at a time.
+  const groupEntries = [...groups.values()];
+  const results = await Promise.allSettled(
+    groupEntries.map(async ({ key, attempts }) => {
       const stored = await queryHistory(key);
       await writeProgress(key, mergeById(attempts.map(toRecord), stored));
-    } catch (err) {
-      console.error('Failed to project progress', key, err);
-      // Report just this target's records so Lambda retries them (and everything
-      // after) rather than the whole batch.
-      for (const record of records) {
-        const sequenceNumber = record.dynamodb?.SequenceNumber;
-        if (sequenceNumber) {
-          batchItemFailures.push({ itemIdentifier: sequenceNumber });
-        }
+    })
+  );
+
+  const batchItemFailures: DynamoDBBatchItemFailure[] = [];
+  results.forEach((result, i) => {
+    if (result.status !== 'rejected') {
+      return;
+    }
+    const { key, records } = groupEntries[i] as ProjectGroup;
+    console.error('Failed to project progress', key, result.reason);
+    // Report just this target's records so Lambda retries them (and everything
+    // after) rather than the whole batch.
+    for (const record of records) {
+      const sequenceNumber = record.dynamodb?.SequenceNumber;
+      if (sequenceNumber) {
+        batchItemFailures.push({ itemIdentifier: sequenceNumber });
       }
     }
-  }
+  });
   return { batchItemFailures };
 }
 
@@ -238,9 +253,10 @@ async function rebuildProgress(childId?: string): Promise<RebuildResult> {
     group.attempts.push(toRecord(attempt));
     groups.set(gk, group);
   }
-  for (const { key, attempts } of groups.values()) {
-    await writeProgress(key, attempts);
-  }
+  // Different targets are fully independent (different partition keys), so
+  // they're written concurrently rather than one at a time -- this matters
+  // most here, where a full rebuild can span every child's every word.
+  await Promise.all([...groups.values()].map(({ key, attempts }) => writeProgress(key, attempts)));
   return { rebuilt: groups.size };
 }
 
