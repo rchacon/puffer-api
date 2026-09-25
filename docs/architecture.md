@@ -10,15 +10,15 @@ the GraphQL schema, resolvers, and application Lambdas only.
 
 ## DynamoDB — single table
 
-One table, generic `PK`/`SK`, plus `GSI1` (`GSI1PK`/`GSI1SK`). Only some items carry the
-`GSI1` attributes (a sparse index): attempts (though nothing queries that index today --
-see below), and progress summaries, so the portal can filter by status.
+One table, generic `PK`/`SK`, plus `GSI1` (`GSI1PK`/`GSI1SK`). Only one item type carries
+the `GSI1` attributes (a sparse index): progress summaries, so the portal can filter by
+status.
 
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, `GSI1SK = <occurredAt>#<attemptId>` (written but currently unread -- see below; kept rather than removed pending a decision on whether some future reader still wants it) |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt` |
 | Progress summary | `CHILD#<childId>` | `PROGRESS#<activity>#<target>` | Derived, rebuildable. `status`, `attemptCount`, `lastPracticedAt`, `lastAttemptKey`, `policyVersion`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>`, `GSI1SK = STATUS#<status>#TARGET#<target>` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by

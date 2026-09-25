@@ -31,18 +31,6 @@ export function attemptSk(attemptId: string): string {
   return `ATTEMPT#${attemptId}`;
 }
 
-// GSI1 partition key holding every attempt at one target, so a target's full
-// history (what progress derivation needs) is a single Query on GSI1.
-export function attemptHistoryPk(childId: string, activity: Activity, target: string): string {
-  return `CHILD#${childId}#ACTIVITY#${activity}#TARGET#${target}`;
-}
-
-// GSI1 sort key within an attempt-history partition: chronological, with the
-// attemptId to keep attempts at the same instant distinct.
-export function attemptHistorySk(occurredAt: string, attemptId: string): string {
-  return `${occurredAt}#${attemptId}`;
-}
-
 // Sort key for a target's progress summary within its child's CHILD# partition.
 export function progressSk(activity: Activity, target: string): string {
   return `PROGRESS#${activity}#${target}`;

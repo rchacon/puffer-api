@@ -185,7 +185,6 @@ describe('recordAttempt (pipeline)', () => {
     expect(b).toMatchObject({ target: 'cat', correct: true });
     const items = (await storedAttempts(child.id)).map((i) => unmarshall(i));
     expect(items).toHaveLength(2);
-    expect(items.every((i) => i.GSI1PK === `CHILD#${child.id}#ACTIVITY#SIGHT_WORD#TARGET#cat`)).toBe(true);
     expect(items.every((i) => i.target === 'cat')).toBe(true);
   });
 

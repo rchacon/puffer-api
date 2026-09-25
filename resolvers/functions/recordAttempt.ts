@@ -1,5 +1,5 @@
 import { runtime, util, type DynamoDBPutItemRequest } from '@aws-appsync/utils';
-import { childPk, attemptSk, attemptHistoryPk, attemptHistorySk } from '../lib/keys.js';
+import { childPk, attemptSk } from '../lib/keys.js';
 import { toAttempt } from '../lib/attempt.js';
 import type { Attempt, AttemptItem, AttemptStash, CognitoContext, RecordAttemptInput } from '../lib/types.js';
 
@@ -42,12 +42,9 @@ export function request(
   if (occurredAtMs > nowMs + MAX_FUTURE_MS || occurredAtMs < nowMs - MAX_PAST_MS) {
     util.error('occurredAt is outside the accepted window', 'ValidationError');
   }
-  // Canonical UTC form, so it sorts chronologically in the GSI1 history key.
   const canonicalOccurredAt = util.time.epochMilliSecondsToISO8601(occurredAtMs);
 
   const item: Record<string, unknown> = {
-    GSI1PK: attemptHistoryPk(childId, activity, target),
-    GSI1SK: attemptHistorySk(canonicalOccurredAt, attemptId),
     id: attemptId,
     childId,
     activity,

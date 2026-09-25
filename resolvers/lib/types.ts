@@ -78,8 +78,6 @@ export interface RecordAttemptInput {
 export interface AttemptItem {
   PK: string;
   SK: string;
-  GSI1PK: string;
-  GSI1SK: string;
   id: string;
   childId: string;
   activity: Activity;

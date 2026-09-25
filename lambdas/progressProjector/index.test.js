@@ -4,7 +4,7 @@ import { GetItemCommand, PutItemCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { createTable } from '../../scripts/create-table.js';
 import { dynamoClient, marshall, TABLE_NAME, unmarshall } from '../../test/dynamoResolverHarness.js';
-import { attemptHistoryPk, attemptHistorySk, attemptSk, childPk, progressSk } from '../../resolvers/lib/keys.ts';
+import { attemptSk, childPk, progressSk } from '../../resolvers/lib/keys.ts';
 import { POLICY_VERSION } from './derive.ts';
 import { handler } from './index.ts';
 
@@ -22,8 +22,6 @@ function attemptItem(childId, target, day, challengeType, correct, activity = 'S
   return {
     PK: childPk(childId),
     SK: attemptSk(id),
-    GSI1PK: attemptHistoryPk(childId, activity, target),
-    GSI1SK: attemptHistorySk(occurredAt, id),
     id,
     childId,
     activity,
@@ -81,7 +79,7 @@ describe('progressProjector: stream events', () => {
       status: 'IN_PROGRESS',
       attemptCount: 1,
       lastPracticedAt: item.occurredAt,
-      lastAttemptKey: attemptHistorySk(item.occurredAt, item.id),
+      lastAttemptKey: `${item.occurredAt}#${item.id}`,
       policyVersion: POLICY_VERSION,
       GSI1PK: `CHILD#${childId}#ACTIVITY#SIGHT_WORD`,
       GSI1SK: 'STATUS#IN_PROGRESS#TARGET#frog',
@@ -233,7 +231,7 @@ describe('progressProjector: stream events', () => {
       status: 'IN_PROGRESS',
       attemptCount: 2,
       lastPracticedAt: newer.occurredAt,
-      lastAttemptKey: attemptHistorySk(newer.occurredAt, newer.id),
+      lastAttemptKey: `${newer.occurredAt}#${newer.id}`,
       policyVersion: POLICY_VERSION,
     });
 
@@ -242,7 +240,7 @@ describe('progressProjector: stream events', () => {
     expect(result).toEqual({ batchItemFailures: [] });
     expect(await getProgress(childId, 'frog')).toMatchObject({
       attemptCount: 2,
-      lastAttemptKey: attemptHistorySk(newer.occurredAt, newer.id),
+      lastAttemptKey: `${newer.occurredAt}#${newer.id}`,
     });
   });
 });
