@@ -11,14 +11,14 @@ the GraphQL schema, resolvers, and application Lambdas only.
 ## DynamoDB — single table
 
 One table, generic `PK`/`SK`, plus `GSI1` (`GSI1PK`/`GSI1SK`). Only some items carry the
-`GSI1` attributes (a sparse index): attempts, so one target's history is a single `Query`,
-and — once progress is derived — progress summaries, so the portal can filter by status.
+`GSI1` attributes (a sparse index): attempts (though nothing queries that index today --
+see below), and progress summaries, so the portal can filter by status.
 
 | Item | PK | SK | Notes |
 |---|---|---|---|
 | Parent profile | `PARENT#<cognitoSub>` | `PROFILE` | `email`, `name`, `createdAt` |
 | Child profile | `PARENT#<cognitoSub>` | `CHILD#<childId>` | `name`, `avatar`, `birthday`, `createdAt` — lives under the parent's partition so "parent + all children" is one `Query` |
-| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, `GSI1SK = <occurredAt>#<attemptId>` |
+| Attempt | `CHILD#<childId>` | `ATTEMPT#<attemptId>` | Immutable. `activity`, `target`, `challengeType`, `answer`, `presentedOptions` (multiple choice only), `correct`, `occurredAt`, `receivedAt`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, `GSI1SK = <occurredAt>#<attemptId>` (written but currently unread -- see below; kept rather than removed pending a decision on whether some future reader still wants it) |
 | Progress summary | `CHILD#<childId>` | `PROGRESS#<activity>#<target>` | Derived, rebuildable. `status`, `attemptCount`, `lastPracticedAt`, `lastAttemptKey`, `policyVersion`. `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>`, `GSI1SK = STATUS#<status>#TARGET#<target>` |
 
 **Attempts are the source of truth.** Nothing about a child's progress is supplied by
@@ -36,9 +36,14 @@ algorithm may change.
   and `receivedAt` is the server's; `occurredAt` is rejected if more than 5 minutes in the
   future or 30 days old (rejected rather than clamped, so a bad clock is visible to the
   client instead of silently rewriting the history).
-- One target's full history (what progress derivation needs) is a single `Query` on
-  `GSI1` with `GSI1PK = CHILD#<childId>#ACTIVITY#<activity>#TARGET#<target>`, in
-  chronological order. GSI reads are eventually consistent.
+- One target's full history (what progress derivation needs) is a single, strongly
+  consistent `Query` on the base table (`PK = CHILD#<childId>`, `begins_with(SK,
+  'ATTEMPT#')`, filtered to the activity/target) -- not `GSI1`, even though attempts
+  still carry `GSI1PK`/`GSI1SK`. GSI reads are only ever eventually consistent, which
+  let two projector invocations processing different new attempts for the same target
+  each miss the other's, silently dropping one for good; the base table has no such
+  lag for a read that runs after the attempt's own write already committed, which is
+  always true by the time a stream record reaches the projector.
 - **Idempotent retries:** `attemptId` is the attempt's identity and its only idempotency
   key (the sort key is `ATTEMPT#<attemptId>`). `prepareAttempt` reads that key first; if
   the attempt exists, `recordAttempt` returns it (`runtime.earlyReturn`) instead of
@@ -62,10 +67,11 @@ algorithm may change.
 
 Status and counts are a *projection* of the attempts, never supplied by a caller. A
 **progress projector** Lambda (`lambdas/progressProjector`) consumes the table's
-DynamoDB Stream. For each newly inserted attempt it reads that target's history from
-`GSI1`, merges in the attempts in its own batch (GSI reads are eventually consistent, so
-the index may not have the newest one yet), runs `deriveProgress`
-(`lambdas/progressProjector/derive.ts`) and overwrites the target's progress summary.
+DynamoDB Stream. For each newly inserted attempt it reads that target's history with a
+strongly consistent base-table query, merges in the attempts in its own batch (belt and
+suspenders -- the query is already consistent, but the merge means nothing depends on
+that), runs `deriveProgress` (`lambdas/progressProjector/derive.ts`) and overwrites the
+target's progress summary.
 Because it recomputes every derived field from the full history rather than
 incrementing, replays just rewrite the same values. It ignores everything but
 inserts of `ATTEMPT#` items, including the summaries it writes itself.
@@ -278,8 +284,9 @@ Nothing here is deployed by this repo; the Terraform in `puffer-infra` must prov
   (The Lambda re-checks this itself, so the filter is an optimization, but without it the
   summaries it writes would each trigger an invocation.)
 - Its IAM role: stream read (`dynamodb:GetRecords`, `GetShardIterator`, `DescribeStream`,
-  `ListStreams`), `dynamodb:Query` on the table and `index/GSI1`, `dynamodb:PutItem`, and
-  `dynamodb:Scan` (only for the all-children rebuild).
+  `ListStreams`), `dynamodb:Query` on the table itself (not `index/GSI1` -- the projector
+  reads attempt history with a strongly consistent base-table query, not GSI1),
+  `dynamodb:PutItem`, and `dynamodb:Scan` (only for the all-children rebuild).
 - The AppSync data source role must be able to `dynamodb:Query` the `index/GSI1` (for
   `childProgress`), in addition to the item access it already has.
 

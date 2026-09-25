@@ -63,10 +63,12 @@ async function getProgress(childId, target, activity = 'SIGHT_WORD') {
 }
 
 describe('progressProjector: stream events', () => {
-  it('writes a summary from a newly inserted attempt, including one not yet visible in GSI1', async () => {
+  it("writes a summary from a newly inserted attempt, even before the history query would return it", async () => {
     const childId = randomUUID();
-    // Deliberately not stored: GSI1 reads are eventually consistent, so the
-    // batch's own attempts must count even if the index hasn't caught up.
+    // Deliberately not stored: the batch's own attempts must count even if
+    // queryHistory doesn't return them (defense in depth -- queryHistory
+    // itself is a strongly consistent read, so this shouldn't happen for a
+    // genuinely-committed attempt, but nothing here should depend on that).
     const item = attemptItem(childId, 'frog', 0, 'SPELL', true);
 
     const result = await handler({ Records: [insertRecord(item)] });
@@ -101,7 +103,25 @@ describe('progressProjector: stream events', () => {
     });
   });
 
-  it('counts an attempt once when it is both in the batch and in GSI1', async () => {
+  it("queries a target's history with a strongly consistent read, not GSI1", async () => {
+    // DynamoDB Local doesn't reproduce real eventual-consistency lag, so this
+    // can't be caught by asserting on derived output -- it pins the request
+    // shape instead. Without ConsistentRead: true here, two invocations
+    // processing different new attempts for the same target could each miss
+    // the other's (a real GSI1 lag window), silently dropping one for good.
+    const childId = randomUUID();
+    const item = await store(attemptItem(childId, 'frog', 0, 'SPELL', true));
+
+    const send = vi.spyOn(DynamoDBDocumentClient.prototype, 'send');
+    await handler({ Records: [insertRecord(item)] });
+    const queryCall = send.mock.calls.map(([cmd]) => cmd).find((cmd) => cmd.constructor.name === 'QueryCommand');
+    send.mockRestore();
+
+    expect(queryCall.input).toMatchObject({ ConsistentRead: true });
+    expect(queryCall.input.IndexName).toBeUndefined();
+  });
+
+  it('counts an attempt once when it is both in the batch and in the queried history', async () => {
     const childId = randomUUID();
     const a = await store(attemptItem(childId, 'frog', 0, 'MULTIPLE_CHOICE', false));
     const b = await store(attemptItem(childId, 'frog', 1, 'MULTIPLE_CHOICE', false));

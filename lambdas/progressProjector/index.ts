@@ -1,13 +1,7 @@
 import type { DynamoDBBatchItemFailure, DynamoDBBatchResponse, DynamoDBRecord, DynamoDBStreamEvent } from 'aws-lambda';
 import { ConditionalCheckFailedException, DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, QueryCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
-import {
-  attemptHistoryPk,
-  childPk,
-  progressSk,
-  statusIndexPk,
-  statusIndexSk,
-} from '../../resolvers/lib/keys.js';
+import { childPk, progressSk, statusIndexPk, statusIndexSk } from '../../resolvers/lib/keys.js';
 import { TABLE_NAME } from '../../lib/tableName.js';
 import type { Activity, AttemptItem, ChallengeType, ProgressItem } from '../../resolvers/lib/types.js';
 import { deriveProgress, type AttemptRecord } from './derive.js';
@@ -79,8 +73,14 @@ function toRecord(item: Pick<AttemptItem, 'id' | 'challengeType' | 'correct' | '
   return { id: item.id, challengeType: item.challengeType, correct: item.correct, occurredAt: item.occurredAt };
 }
 
-// A target's full history from GSI1. GSI reads are eventually consistent, so
-// callers merge in the attempts they already know about.
+// A target's full history, strongly consistent. Reads the base table rather
+// than GSI1: GSI reads are only ever eventually consistent, which let two
+// invocations processing different new attempts for the same target each
+// miss the other's, even with no real concurrency involved -- whichever's
+// write lost the watermark race (see writeProgress) was silently dropped
+// for good. A consistent read here closes that gap, since by the time any
+// invocation runs, every attempt whose stream event already fired has
+// necessarily already committed.
 async function queryHistory({ childId, activity, target }: TargetKey): Promise<AttemptRecord[]> {
   const attempts: AttemptRecord[] = [];
   let startKey: Record<string, unknown> | undefined;
@@ -88,9 +88,15 @@ async function queryHistory({ childId, activity, target }: TargetKey): Promise<A
     const page = await client.send(
       new QueryCommand({
         TableName: TABLE_NAME,
-        IndexName: 'GSI1',
-        KeyConditionExpression: 'GSI1PK = :pk',
-        ExpressionAttributeValues: { ':pk': attemptHistoryPk(childId, activity, target) },
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :prefix)',
+        FilterExpression: 'activity = :activity AND target = :target',
+        ExpressionAttributeValues: {
+          ':pk': childPk(childId),
+          ':prefix': 'ATTEMPT#',
+          ':activity': activity,
+          ':target': target,
+        },
+        ConsistentRead: true,
         ExclusiveStartKey: startKey,
       })
     );
