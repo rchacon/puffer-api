@@ -57,7 +57,7 @@ jobs:
         run: npm run typecheck
 
       - name: Build
-        run: npm run build
+        run: npm run build -- progressProjector
 
       - name: Sanity-check the built Lambda imports cleanly
         run: node -e "console.log('Imported handler OK:', typeof require('./build/lambda/progressProjector/index.js').handler)"

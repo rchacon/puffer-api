@@ -57,7 +57,7 @@ jobs:
         run: npm run typecheck
 
       - name: Build
-        run: npm run build
+        run: npm run build -- resolvers
 
       - name: Generate AppSync CloudFormation template
         run: npm run build:appsync-template

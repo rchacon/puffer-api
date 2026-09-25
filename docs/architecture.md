@@ -198,9 +198,11 @@ through it) isn't justified here.
    independently of the GraphQL app's `package.json` version).
 2. Tests + `tsc --noEmit` run again here (not just relying on `main` already
    being green), since a tag could in principle point at any commit.
-3. `scripts/build.mjs` bundles the Lambda (CJS — the AWS SDK's CJS internals
-   don't survive esbuild's ESM output without an interop shim) into
-   `build/lambda/postConfirmation.zip`.
+3. `scripts/build.mjs postConfirmation` bundles just this Lambda (CJS — the AWS
+   SDK's CJS internals don't survive esbuild's ESM output without an interop
+   shim) into `build/lambda/postConfirmation.zip` — scoped to this one target
+   so a build failure in `progressProjector` or the resolvers can't block this
+   deploy, matching the "versioned and deployed independently" claim above.
 4. A sanity check imports the built bundle and confirms `handler` is a function,
    and a size check fails clearly if the zip would exceed Lambda's 50MB
    direct-upload limit — both mirror `cd-api-deploy.yml`'s equivalent steps.
@@ -220,9 +222,10 @@ IaC tool.
 1. `scripts/check-tag-version.sh` checks the tag against `package.json`'s
    `version`.
 2. Tests + `tsc --noEmit`, same as above.
-3. `scripts/build.mjs` bundles each resolver (esbuild, `@aws-appsync/utils` kept
-   external so it resolves to AppSync's real runtime at deploy time) into
-   `build/resolvers/**/*.js`, and copies `schema.graphql`.
+3. `scripts/build.mjs resolvers` bundles each resolver (esbuild, `@aws-appsync/utils`
+   kept external so it resolves to AppSync's real runtime at deploy time) into
+   `build/resolvers/**/*.js`, and copies `schema.graphql` — scoped to just the
+   resolvers so a build failure in either Lambda can't block this deploy.
 4. `scripts/generate-appsync-template.mjs` generates `build/appsync-template.json`
    — a CloudFormation template (JSON, not YAML: resolver code and the schema
    definition are arbitrary multi-line strings, and `JSON.stringify` escapes

@@ -11,10 +11,25 @@
 // Terraform (puffer-infra) never runs this -- it only ever references
 // already-built files. This script, and the workflow that calls it, are
 // puffer-api's job alone.
+//
+// Usage: `node scripts/build.mjs [target]`, where target is one of
+// 'resolvers', 'postConfirmation' or 'progressProjector'. With no target,
+// builds everything (local dev). Each deploy workflow passes its own single
+// target so a break in one component's build can't block a release of an
+// unrelated one -- the three components are versioned and deployed
+// independently (see docs/architecture.md), and the build should be too.
 import { build } from 'esbuild';
 import { existsSync, mkdirSync, readdirSync, cpSync, rmSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { execSync } from 'node:child_process';
+
+const VALID_TARGETS = ['resolvers', 'postConfirmation', 'progressProjector'];
+const target = process.argv[2];
+if (target !== undefined && !VALID_TARGETS.includes(target)) {
+  console.error(`Unknown build target '${target}' -- expected one of: ${VALID_TARGETS.join(', ')}`);
+  process.exit(1);
+}
+const wants = (name) => target === undefined || target === name;
 
 const BUILD_DIR = 'build';
 
@@ -42,8 +57,12 @@ async function buildResolverDir(sourceDir, outDir) {
   }
 }
 
-await buildResolverDir('resolvers', join(BUILD_DIR, 'resolvers'));
-await buildResolverDir('resolvers/functions', join(BUILD_DIR, 'resolvers', 'functions'));
+if (wants('resolvers')) {
+  await buildResolverDir('resolvers', join(BUILD_DIR, 'resolvers'));
+  await buildResolverDir('resolvers/functions', join(BUILD_DIR, 'resolvers', 'functions'));
+  cpSync('schema.graphql', join(BUILD_DIR, 'schema.graphql'));
+  console.log(`Copied schema.graphql`);
+}
 
 async function buildLambda(name) {
   const lambdaOutDir = join(BUILD_DIR, 'lambda', name);
@@ -69,10 +88,7 @@ async function buildLambda(name) {
   console.log(`Built ${join(BUILD_DIR, 'lambda', `${name}.zip`)}`);
 }
 
-await buildLambda('postConfirmation');
-await buildLambda('progressProjector');
-
-cpSync('schema.graphql', join(BUILD_DIR, 'schema.graphql'));
-console.log(`Copied schema.graphql`);
+if (wants('postConfirmation')) await buildLambda('postConfirmation');
+if (wants('progressProjector')) await buildLambda('progressProjector');
 
 console.log(`\nBuild complete: ${BUILD_DIR}/`);
